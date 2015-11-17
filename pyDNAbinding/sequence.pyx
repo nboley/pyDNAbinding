@@ -122,8 +122,11 @@ def one_hot_encode_sequences(sequences):
     finally:
         free(c_sequences)
 
+class OneHotCodedDNASeq(np.ndarray):
+    pass
+
 def one_hot_encode_sequence(sequence):
-    return one_hot_encode_sequences((sequence,))[0,]
+    return one_hot_encode_sequences((sequence,))[0,].view(OneHotCodedDNASeq)
 
 def profile( seq_len, n_seq, n_test_iterations ):
     """Test the speed of the one-hot-encoding implementation.

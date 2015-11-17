@@ -1,5 +1,5 @@
 import numpy as np
-from sequence import one_hot_encode_sequence
+from sequence import one_hot_encode_sequence, OneHotCodedDNASeq
 from signal import overlap_add_convolve
 
 class DNASequence(object):
@@ -19,6 +19,10 @@ class DNASequence(object):
 class DNASequences(object):
     def __iter__(self):
         return iter(self._seqs)
+        
+    def iter_one_hot_coded_seqs(self):
+        for seq in self:
+            yield seq.one_hot_coded_seq
     
     def __len__(self):
         return len(self._seqs)
@@ -37,6 +41,12 @@ class DNASequences(object):
             self._seq_lens.append(len(seqs))
             self._seqs.append(seq)
         self._seq_lens = np.array(self._seq_lens, dtype=int)
+
+class FixedLengthDNASequences(DNASequences):
+    def __init__(self, seqs):
+        DNASequences.__init__(self, seqs)
+        self.seq_len = self.seq_lens[0]
+        assert all(self.seq_len == seq_len for seq_len in self.seq_lens)
 
 class DNABindingModel(object):
     def score_binding_sites(self, seq):
@@ -80,16 +90,27 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         self.convolutional_filter = convolutional_filter
     
     def score_binding_sites(self, seq):
-        assert isinstance(seq, DNASequence)
+        if isinstance(seq, str):
+            coded_seq = one_hot_encode_sequence(seq)
+        elif isinstance(seq, DNASequence):
+            coded_seq = seq.one_hot_coded_seq
+        elif isinstance(seq, OneHotCodedDNASeq):
+            coded_seq = seq
+        else:
+            assert False, "Unrecognized sequence type '%s'" % str(type(seq))
         return overlap_add_convolve(
-            seq.one_hot_coded_seq, self.convolutional_filter, mode='valid')
+            coded_seq, self.convolutional_filter, mode='valid')
 
     def score_seqs_binding_sites(self, seqs):
-        assert isinstance(seqs, DNASequences)
-        rv = []
-        for seq in seqs:
-            rv.append(self.score_binding_sites(seq))
-        return rv
+        # special case teh fixed length sets because we can re-use
+        # the inverse fft in the convolutional stage
+        if isinstance(seqs, FixedLengthDNASequences):
+            assert False
+        elif isinstance(seqs, DNASequences):
+            rv = []
+            for one_hot_coded_seq in seqs.iter_one_hot_coded_seqs():
+                rv.append(self.score_binding_sites(one_hot_coded_seq))
+            return rv
 
 class DeltaDeltaGArray(np.ndarray):
     def calc_ddg(self, coded_subseq):
