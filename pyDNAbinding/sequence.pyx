@@ -123,7 +123,7 @@ def one_hot_encode_sequences(sequences):
         free(c_sequences)
 
 def one_hot_encode_sequence(sequence):
-    return one_hot_encode_sequences((sequence,))
+    return one_hot_encode_sequences((sequence,))[0,]
 
 def profile( seq_len, n_seq, n_test_iterations ):
     """Test the speed of the one-hot-encoding implementation.
