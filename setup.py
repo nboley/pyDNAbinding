@@ -35,9 +35,7 @@ config = {
     'download_url': 'https://github.com/nboley/pyDNAbinding/',
     'author_email': 'npboley@gmail.com',
     'version': '0.1.1',
-    'packages': ['pyDNAbinding', 
-                 'pyDNAbinding.selex'
-             ],
+    'packages': ['pyDNAbinding', ],
     'setup_requires': [],
     'install_requires': [ 'scipy', 'numpy' ],
     'scripts': [],
