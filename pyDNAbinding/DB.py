@@ -3,7 +3,7 @@ import numpy as np
 import psycopg2
 conn = psycopg2.connect("host=mitra dbname=cisbp")
 
-from model import (
+from binding_model import (
     ConvolutionalDNABindingModel, EnergeticDNABindingModel, DNABindingModels )
 
 def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):

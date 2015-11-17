@@ -16,6 +16,28 @@ class DNASequence(object):
     def __repr__(self):
         return repr(self.seq)
 
+class DNASequences(object):
+    def __iter__(self):
+        return iter(self._seqs)
+    
+    def __len__(self):
+        return len(self._seqs)
+    
+    @property
+    def seq_lens(self):
+        return self._seq_lens
+    
+    def __init__(self, seqs):
+        self._seqs = []
+        self._seq_lens = []
+        for seq in seqs:
+            if isinstance(seq, str):
+                seq = DNASequence(seq)
+            assert isinstance(seq, DNASequence)
+            self._seq_lens.append(len(seqs))
+            self._seqs.append(seq)
+        self._seq_lens = np.array(self._seq_lens, dtype=int)
+
 class DNABindingModel(object):
     def score_binding_sites(self, seq):
         """Score each binding site in seq. 
@@ -58,11 +80,16 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         self.convolutional_filter = convolutional_filter
     
     def score_binding_sites(self, seq):
-        if isinstance(seq, str):
-            seq = DNASequence(seq)
         assert isinstance(seq, DNASequence)
         return overlap_add_convolve(
             seq.one_hot_coded_seq, self.convolutional_filter, mode='valid')
+
+    def score_seqs_binding_sites(self, seqs):
+        assert isinstance(seqs, DNASequences)
+        rv = []
+        for seq in seqs:
+            rv.append(self.score_binding_sites(seq))
+        return rv
 
 class DeltaDeltaGArray(np.ndarray):
     def calc_ddg(self, coded_subseq):
