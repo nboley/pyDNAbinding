@@ -142,3 +142,10 @@ def profile( seq_len, n_seq, n_test_iterations ):
         lambda: one_hot_encode_sequences(sequences) )
     print "Time :", t_MEMCPY.timeit(number=n_test_iterations)
     return 
+
+################################################################################
+
+import random
+def sample_random_seqs(n_sims, seq_len):
+    return ["".join(random.choice('ACGT') for j in xrange(seq_len))
+            for i in xrange(n_sims)]

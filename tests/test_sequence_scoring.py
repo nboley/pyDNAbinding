@@ -1,11 +1,16 @@
 import numpy as np
 
+import random
+
 import pyDNAbinding
+from pyDNAbinding.signal import (
+    multichannel_fftconvolve, multichannel_overlap_add_fftconvolve )
 from pyDNAbinding.binding_model import (
     DNASequence, DNASequences, FixedLengthDNASequences, 
     score_coded_seq_with_convolutional_filter )
 from pyDNAbinding.DB import ( 
     load_binding_models_from_db, load_selex_models_from_db, load_pwms_from_db)
+from pyDNAbinding.sequence import sample_random_seqs
 
 TEST_MODEL_TF_NAME = 'CTCF'
 
@@ -66,9 +71,56 @@ def score_seqs():
     assert score(seq, motif, 'RC').round(6) == [4,]
     print 'PASS'
 
-score_seqs()
-score_selex_model()
-score_pwm()
-score_model()
-score_multiple_seqs()
-score_multiple_fixed_len_seqs()
+def test_my_fft_convolve():
+    from scipy.signal import fftconvolve
+    def test(x, h):
+        my = multichannel_fftconvolve(x, h)
+        theirs = fftconvolve(x, h, mode='valid')[:,0]
+        assert np.abs(my - theirs).sum() < 1e-6
+    
+    for seq_len in xrange(2, 100):
+        for seq in sample_random_seqs(10, seq_len): 
+            x = DNASequence(seq).one_hot_coded_seq
+            h = np.random.rand(random.randint(1, min(30, seq_len)), 4)
+            test(x, h)
+    print 'PASS'
+
+def compare_convolve_speeds(x, h):
+    from scipy.signal import fftconvolve
+    import timeit
+    
+    def test_scipy():
+        return fftconvolve(x, h, mode='valid')
+
+    def test_fft():
+        return multichannel_fftconvolve(x, h, mode='valid')
+
+    def test_overlap_add():
+        return multichannel_overlap_add_fftconvolve(x, h, mode='valid')
+
+    print "SciPY", timeit.timeit(
+        lambda: test_scipy(), 
+        number=max(1, int(100000/x.shape[0])))
+    print "Naive FFT", timeit.timeit(
+        lambda: test_fft(), 
+        number=max(1, int(100000/x.shape[0])))
+    print "Overlap Add", timeit.timeit(
+        lambda: test_overlap_add(), 
+        number=max(1, int(100000/x.shape[0])))
+
+    return
+
+for seq_len in (100, 1000, 1024, 1500, 2048, 10000):
+    print seq_len
+    x = DNASequence('A'*seq_len).one_hot_coded_seq
+    h = np.random.rand(10, 4)
+    compare_convolve_speeds(x, h)
+    print
+
+test_my_fft_convolve()
+#score_seqs()
+#score_selex_model()
+#score_pwm()
+#score_model()
+#score_multiple_seqs()
+#score_multiple_fixed_len_seqs()

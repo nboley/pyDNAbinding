@@ -1,7 +1,7 @@
 import numpy as np
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
-from signal import overlap_add_convolve
+from signal import multichannel_convolve
 
 class ScoreDirection():
     __slots__ = ['FWD', 'RC', 'MAX']
@@ -26,15 +26,15 @@ def score_coded_seq_with_convolutional_filter(
     """
     assert direction in ScoreDirection.__slots__
     if direction == ScoreDirection.FWD: 
-        return overlap_add_convolve(
+        return multichannel_convolve(
             np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
     elif direction == ScoreDirection.RC: 
         return overlap_add_convolve(
             coded_seq, filt, mode='valid')
     elif direction == ScoreDirection.MAX:
-        fwd_scores = overlap_add_convolve(
+        fwd_scores = multichannel_convolve(
             np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
-        rc_scores = overlap_add_convolve(
+        rc_scores = multichannel_convolve(
             coded_seq, filt, mode='valid')
         # take the in-place maximum
         return np.maximum(fwd_scores, rc_scores, fwd_scores) 
