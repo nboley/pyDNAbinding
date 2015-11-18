@@ -1,14 +1,55 @@
 import numpy as np
-from sequence import one_hot_encode_sequence, OneHotCodedDNASeq
+from sequence import (
+    one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
 from signal import overlap_add_convolve
+
+class ScoreDirection():
+    __slots__ = ['FWD', 'RC', 'MAX']
+    FWD = 'FWD'
+    RC = 'RC'
+    MAX = 'MAX'
+
+def score_coded_seq_with_convolutional_filter(
+        coded_seq, filt, direction):
+    """Score coded sequence using the convolutional filter filt. 
+    
+    input:
+    coded_seq: hot-one encoded DNA sequence (Nx4) where N is the number
+               of bases in the sequence.
+    filt     : the convolutional filter (e.g. pwm) to score the model with.
+    direction: The direction to score the sequence in. 
+               FWD: score the forward sequence
+                RC: score using the reverse complement of the filter
+               MAX: score in both diretions, and then return the maximum score 
+                    between the two directions
+    returns  : Nx(BS_len-seq_len+1) numpy array with binding sites scores
+    """
+    assert direction in ScoreDirection.__slots__
+    if direction == ScoreDirection.FWD: 
+        return overlap_add_convolve(
+            np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
+    elif direction == ScoreDirection.RC: 
+        return overlap_add_convolve(
+            coded_seq, filt, mode='valid')
+    elif direction == ScoreDirection.MAX:
+        fwd_scores = overlap_add_convolve(
+            np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
+        rc_scores = overlap_add_convolve(
+            coded_seq, filt, mode='valid')
+        # take the in-place maximum
+        return np.maximum(fwd_scores, rc_scores, fwd_scores) 
+    assert False, 'Should be unreachable'
 
 class DNASequence(object):
     def __len__(self):
         return len(self.seq)
     
-    def __init__(self, seq):
+    def __init__(self, seq, one_hot_coded_seq=None):
         self.seq = seq
-        self.one_hot_coded_seq = one_hot_encode_sequence(seq)
+
+        if one_hot_coded_seq == None:
+            one_hot_coded_seq = one_hot_encode_sequence(seq)
+        self.one_hot_coded_seq = one_hot_coded_seq
 
     def __str__(self):
         return str(self.seq)
@@ -43,10 +84,19 @@ class DNASequences(object):
         self._seq_lens = np.array(self._seq_lens, dtype=int)
 
 class FixedLengthDNASequences(DNASequences):
+    def __iter__(self):
+        for seq, coded_seq in izip(self.seqs, self.one_hot_encoded_seqs):
+            yield DNASequence(seq, coded_seq.view(OneHotCodedDNASeq))
+        return
+
+    def iter_one_hot_coded_seqs(self):
+        return (x.view(OneHotCodedDNASeq) for x in self.one_hot_coded_seqs)
+    
     def __init__(self, seqs):
-        DNASequences.__init__(self, seqs)
-        self.seq_len = self.seq_lens[0]
-        assert all(self.seq_len == seq_len for seq_len in self.seq_lens)
+        self._seqs = list(seqs)
+        self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
+        self._seq_lens = np.array([len(seq) for seq in self._seqs])
+        assert self._seq_lens.max() == self._seq_lens.min()
 
 class DNABindingModel(object):
     def score_binding_sites(self, seq):
@@ -76,7 +126,13 @@ class DNABindingModels(object):
         assert all(isinstance(mo, DNABindingModel) for mo in models)
 
 class ConvolutionalDNABindingModel(DNABindingModel):
-    def __len__(self):
+    @property
+    def consensus_seq(self):
+        return "".join( 'ACGT'[x] for x in np.argmin(
+            self.convolutional_filter, axis=1) )
+
+    @property
+    def motif_len(self):
         return self.binding_site_len
     
     def __init__(self, convolutional_filter, **kwargs):
@@ -89,7 +145,8 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         self.binding_site_len = convolutional_filter.shape[0]
         self.convolutional_filter = convolutional_filter
     
-    def score_binding_sites(self, seq):
+    def score_binding_sites(self, seq, direction='MAX'):
+        assert direction in ('FWD', 'RC', 'MAX')
         if isinstance(seq, str):
             coded_seq = one_hot_encode_sequence(seq)
         elif isinstance(seq, DNASequence):
@@ -98,65 +155,42 @@ class ConvolutionalDNABindingModel(DNABindingModel):
             coded_seq = seq
         else:
             assert False, "Unrecognized sequence type '%s'" % str(type(seq))
-        return overlap_add_convolve(
-            coded_seq, self.convolutional_filter, mode='valid')
+        return score_coded_seq_with_convolutional_filter(
+            coded_seq, self.convolutional_filter, direction=direction)
 
     def score_seqs_binding_sites(self, seqs):
         # special case teh fixed length sets because we can re-use
         # the inverse fft in the convolutional stage
-        if isinstance(seqs, FixedLengthDNASequences):
-            assert False
-        elif isinstance(seqs, DNASequences):
-            rv = []
-            for one_hot_coded_seq in seqs.iter_one_hot_coded_seqs():
-                rv.append(self.score_binding_sites(one_hot_coded_seq))
-            return rv
+        #if isinstance(seqs, FixedLengthDNASequences):
+        #elif isinstance(seqs, DNASequences):
+        rv = []
+        for one_hot_coded_seq in seqs.iter_one_hot_coded_seqs():
+            rv.append(self.score_binding_sites(one_hot_coded_seq))
+        return rv
 
 class DeltaDeltaGArray(np.ndarray):
-    def calc_ddg(self, coded_subseq):
-        """Calculate delta delta G for coded_subseq.
-        """
-        return self[coded_subseq].sum()
+    pass    
 
-    def calc_base_contributions(self):
-        base_contribs = np.zeros((len(self)/3, 4))
-        base_contribs[:,1:4] = self.reshape((len(self)/3,3))
-        return base_contribs
+class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
+    @property
+    def min_energy(self, ref_energy):
+        return self.ref_energy + self.ddg_array.min(1).sum()
 
-    def calc_normalized_base_conts(self, ref_energy):
-        base_contribs = self.calc_base_contributions()
-        ref_energy += base_contribs.min(1).sum()
-        for i, min_energy in enumerate(base_contribs.min(1)):
-            base_contribs[i,:] -= min_energy
-        return ref_energy, base_contribs
-    
-    def calc_min_energy(self, ref_energy):
-        base_contribs = self.calc_base_contributions()
-        return ref_energy + base_contribs.min(1).sum()
+    @property
+    def max_energy(self, ref_energy):
+        return self.ref_energy + self.ddg_array.max(1).sum()
 
-    def calc_max_energy(self, ref_energy):
-        base_contribs = self.calc_base_contributions()
-        return ref_energy + base_contribs.max(1).sum()
-    
     @property
     def mean_energy(self):
         return self.sum()/(len(self)/self.motif_len)
-    
-    @property
-    def motif_len(self):
-        return len(self)/3
 
-    def consensus_seq(self):
-        base_contribs = self.calc_base_contributions()
-        return "".join( 'ACGT'[x] for x in np.argmin(base_contribs, axis=1) )
-
-class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     def __init__(self, ref_energy, ddg_array, **kwargs):
         DNABindingModel._init_meta_data(self, kwargs)
 
         self.ref_energy = ref_energy
         self.ddg_array = ddg_array.view(DeltaDeltaGArray)
-
+        assert self.ddg_array.shape[1] == 4
+        
         # add the reference energy to every entry of the convolutional 
         # filter, and then multiply by negative 1 (so that higher scores 
         # correspond to higher binding affinity )

@@ -24,11 +24,12 @@ def overlap_add_convolve(x, h, mode='full', block_power=10):
     num_channels = h.shape[1]
     h_len = h.shape[0]
     assert x.shape[1] == num_channels
+    assert x_len >= h_len, \
+        "The signal needs to be at least as long as the filter"
     
     x = np.vstack((np.zeros((h_len, num_channels)), 
                    x, 
                    np.zeros((h_len, num_channels))))    
-
     # make sure that the desired block size is long enough to capture the motif
     block_size = max(2**block_power, h_len)
     N = int(2**math.ceil(np.log2(block_size+h_len-1)))
@@ -47,6 +48,6 @@ def overlap_add_convolve(x, h, mode='full', block_power=10):
     if mode == 'full':
         return y
     elif mode == 'valid':
-        return y[h_len-1:-h_len+1]
+        return y[h_len-1:x_len]
     elif mode == 'same':
         raise NotImplementedError, "'same' mode is not implemented"
