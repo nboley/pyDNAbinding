@@ -6,9 +6,11 @@ import pyDNAbinding
 from pyDNAbinding.signal import (
     multichannel_fftconvolve, 
     multichannel_overlap_add_fftconvolve, 
-    multichannel_convolve )
+    multichannel_convolve)
+
 from pyDNAbinding.binding_model import (
     DNASequence, DNASequences, FixedLengthDNASequences, 
+    ConvolutionalDNABindingModel,
     score_coded_seq_with_convolutional_filter )
 from pyDNAbinding.DB import ( 
     load_binding_models_from_db, load_selex_models_from_db, load_pwms_from_db)
@@ -20,36 +22,36 @@ def score_selex_model(seq_len=100000):
     models = load_selex_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq)
-    print model.motif_len, score.shape
+    score = model.score_binding_sites(seq, 'MAX')
+    print 'PASS', model.motif_len, score.shape
 
 def score_pwm(seq_len=100000):
     models = load_pwms_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq)
-    print model.motif_len, score.shape
+    score = model.score_binding_sites(seq, 'MAX')
+    print 'PASS', model.motif_len, score.shape
 
 def score_model(seq_len=100000):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq)
-    print model.motif_len, score.shape
+    score = model.score_binding_sites(seq, 'MAX')
+    print 'PASS', model.motif_len, score.shape
 
 def score_multiple_seqs(seq_len=100000, n_seqs=10):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seqs = DNASequences(['A'*seq_len]*n_seqs)
-    scores = model.score_seqs_binding_sites(seqs)
-    print model.motif_len, len(scores)
+    scores = model.score_seqs_binding_sites(seqs, 'MAX')
+    print 'PASS', model.motif_len, len(scores)
 
 def score_multiple_fixed_len_seqs(seq_len=10000, n_seqs=100):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seqs = FixedLengthDNASequences(['A'*seq_len]*n_seqs)
-    scores = model.score_seqs_binding_sites(seqs)
-    print model.motif_len, len(seqs), len(scores)
+    scores = model.score_seqs_binding_sites(seqs, 'MAX')
+    print 'PASS', model.motif_len, len(seqs), len(scores)
 
 def score_seqs():
     def score(seq, motif, direction):
@@ -118,13 +120,33 @@ def compare_convolve_speeds(x, h):
 
     return
 
-for seq_len in (100, 1000, 1024, 1500, 2048, 10000):
-    print seq_len
-    x = DNASequence('A'*seq_len).one_hot_coded_seq
-    h = np.random.rand(10, 4)
-    compare_convolve_speeds(x, h)
-    print
+def profile_convolve_speeds():
+    for seq_len in (100, 1000, 1500, 2048, 5000, 10000):
+        print seq_len
+        x = DNASequence('A'*seq_len).one_hot_coded_seq
+        h = np.random.rand(10, 4)
+        compare_convolve_speeds(x, h)
+        print
 
+def profile_multi_convolve(seq_len, n_seqs):
+    import timeit
+    seqs = FixedLengthDNASequences(['A'*seq_len]*n_seqs)
+    hs = []
+    for i in xrange(10):
+        h = np.random.rand(10, 4)
+        hs.append(ConvolutionalDNABindingModel(np.array([[0, 0, 0, 1],])))
+    
+    print "Naive", timeit.timeit(
+        lambda: [seqs._naive_score_binding_sites(h, 'MAX') for h in hs], 
+        number=1)
+    print "Merged", timeit.timeit(
+        lambda: [seqs.score_binding_sites(h, 'MAX') for h in hs], 
+        number=1)
+    print "Optimized", timeit.timeit(
+        lambda: [(seqs._clever_score_binding_sites(h, True),
+                  seqs._clever_score_binding_sites(h, False)) for h in hs], 
+        number=1)
+"""
 test_my_fft_convolve()
 score_seqs()
 score_selex_model()
@@ -132,3 +154,7 @@ score_pwm()
 score_model()
 score_multiple_seqs()
 score_multiple_fixed_len_seqs()
+
+profile_convolve_speeds()
+"""
+profile_multi_convolve(1000, 100)

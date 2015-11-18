@@ -1,7 +1,8 @@
 import numpy as np
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
-from signal import multichannel_convolve
+
+from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
 
 class ScoreDirection():
     __slots__ = ['FWD', 'RC', 'MAX']
@@ -71,6 +72,9 @@ class DNASequences(object):
     @property
     def seq_lens(self):
         return self._seq_lens
+
+    def score_binding_sites(self, model, direction):
+        return model.score_seqs_binding_sites(self, direction)
     
     def __init__(self, seqs):
         self._seqs = []
@@ -84,6 +88,9 @@ class DNASequences(object):
         self._seq_lens = np.array(self._seq_lens, dtype=int)
 
 class FixedLengthDNASequences(DNASequences):
+    max_bs_len = 200
+    max_fft_seq_len = 500000
+    
     def __iter__(self):
         for seq, coded_seq in izip(self.seqs, self.one_hot_encoded_seqs):
             yield DNASequence(seq, coded_seq.view(OneHotCodedDNASeq))
@@ -91,12 +98,74 @@ class FixedLengthDNASequences(DNASequences):
 
     def iter_one_hot_coded_seqs(self):
         return (x.view(OneHotCodedDNASeq) for x in self.one_hot_coded_seqs)
+
+    def _naive_score_binding_sites(self, model, direction):
+        """Score binding sites by looping over all sequences.
+        
+        """
+        return np.array(
+            DNASequences.score_binding_sites(self, model, direction))
+
+    def _clever_score_binding_sites(self, model, reverse_comp):
+        """Score binding sites by a cached fft convolve.
+
+        Only works when the sequence length is less than 10kb
+        and the binsing site length is less than 
+        self.max_bs_len (200 bp).
+        """
+        assert isinstance(model, ConvolutionalDNABindingModel)
+        n_channels = model.shape[1]
+        assert n_channels == self.one_hot_coded_seqs.shape[2]
+        assert model.binding_site_len < self.max_bs_len
+        convolutional_filter = model.convolutional_filter
+        if reverse_comp: 
+            convolutional_filter = np.flipud(np.fliplr(convolutional_filter))
+        h_freq = rfftn(
+            model.convolutional_filter, 
+            (self.freq_one_hot_coded_seqs.shape[1], n_channels))
+        conv_freq = self.freq_one_hot_coded_seqs*h_freq[None,:,:]
+        return irfftn(conv_freq)[:len(self), :self.seq_len, n_channels-1]
+
+    def score_binding_sites(self, model, direction):
+        if (self.freq_one_hot_coded_seqs is None
+            or model.motif_len > self.max_bs_len 
+            or self.seq_len > self.max_fft_seq_len):
+            return self._naive_score_binding_sites(model, direction)
+        else:
+            if direction == ScoreDirection.FWD:
+                return self._clever_score_binding_sites(
+                    model, reverse_comp=True)
+            elif direction == ScoreDirection.RC:
+                return self._clever_score_binding_sites(
+                    model, reverse_comp=False)
+            elif direction == ScoreDirection.MAX:
+                fwd_scores = self._clever_score_binding_sites(
+                    model, reverse_comp=True)
+                rc_scores = self._clever_score_binding_sites(
+                    model, reverse_comp=False)
+                # take the in-place maximum
+                return np.maximum(fwd_scores, rc_scores, fwd_scores) 
     
+    def _init_freq_one_hot_coded_seqs(self):
+        if self.seq_len > self.max_fft_seq_len:
+            return None
+        fshape = ( 
+            next_good_fshape(len(self)), 
+            next_good_fshape(self.seq_len+self.max_bs_len-1), 
+            self.one_hot_coded_seqs.shape[2] 
+        )
+        return rfftn(self.one_hot_coded_seqs, fshape)
+
     def __init__(self, seqs):
         self._seqs = list(seqs)
-        self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
+
         self._seq_lens = np.array([len(seq) for seq in self._seqs])
         assert self._seq_lens.max() == self._seq_lens.min()
+        self.seq_len = self._seq_lens[0]
+
+        self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
+        self.freq_one_hot_coded_seqs = self._init_freq_one_hot_coded_seqs()
+
 
 class DNABindingModel(object):
     def score_binding_sites(self, seq):
@@ -144,8 +213,9 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 
         self.binding_site_len = convolutional_filter.shape[0]
         self.convolutional_filter = convolutional_filter
-    
-    def score_binding_sites(self, seq, direction='MAX'):
+        self.shape = self.convolutional_filter.shape
+
+    def score_binding_sites(self, seq, direction):
         assert direction in ('FWD', 'RC', 'MAX')
         if isinstance(seq, str):
             coded_seq = one_hot_encode_sequence(seq)
@@ -158,14 +228,14 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         return score_coded_seq_with_convolutional_filter(
             coded_seq, self.convolutional_filter, direction=direction)
 
-    def score_seqs_binding_sites(self, seqs):
+    def score_seqs_binding_sites(self, seqs, direction):
         # special case teh fixed length sets because we can re-use
         # the inverse fft in the convolutional stage
         #if isinstance(seqs, FixedLengthDNASequences):
         #elif isinstance(seqs, DNASequences):
         rv = []
         for one_hot_coded_seq in seqs.iter_one_hot_coded_seqs():
-            rv.append(self.score_binding_sites(one_hot_coded_seq))
+            rv.append(self.score_binding_sites(one_hot_coded_seq, direction))
         return rv
 
 class DeltaDeltaGArray(np.ndarray):

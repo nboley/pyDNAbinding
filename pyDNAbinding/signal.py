@@ -4,6 +4,7 @@ import numpy as np
 from numpy.fft import rfftn, irfftn
 
 OVERLAP_ADD_BLOCK_POWER = 10
+USE_OVERLAP_ADD_MIN_LENGTH = 8192
 
 def _next_regular(target):
     """
@@ -12,8 +13,6 @@ def _next_regular(target):
     Also known as 5-smooth numbers or Hamming numbers, these are the optimal
     size for inputs to FFTPACK.
     Target must be a positive integer.
-
-    (copied from the scipy source) 
     """
     if target <= 6:
         return target
@@ -55,6 +54,18 @@ def _next_regular(target):
         match = p5
     return match
 
+def next_good_fshape(x):
+    return _next_regular(x)
+    if x <= 6: 
+        return x
+    elif x < 1024: 
+        return 2**int(math.ceil(np.log2(x)))
+    else:
+        return _next_regular(x)
+
+def _transformed_fft_convolve(freq_h, freq_x):
+    return irfftn(freq_x*freq_h)
+
 def multichannel_fftconvolve(x, h, mode='valid'):
     x_len = x.shape[0]
     num_channels = h.shape[1]
@@ -67,7 +78,7 @@ def multichannel_fftconvolve(x, h, mode='valid'):
     fshape = (int(2**math.ceil(np.log2((x_len + h_len - 1)))), num_channels)
     x_fft = rfftn(x, fshape)
     h_fft = rfftn(h, fshape)
-    ret = irfftn(x_fft*h_fft)
+    ret = _transformed_fft_convolve(x_fft, h_fft)
     
     return ret[h_len-1:x_len, num_channels-1]
 
@@ -126,7 +137,7 @@ def multichannel_convolve(x, h, mode='valid'):
     """
     if mode != 'valid':
         raise NotImplementedError, "'%s' mode is not implemented" % mode
-    if x.shape[0] < 2**(OVERLAP_ADD_BLOCK_POWER+1):
+    if x.shape[0] < USE_OVERLAP_ADD_MIN_LENGTH:
         return multichannel_fftconvolve(x, h, mode)
     else:
         return multichannel_overlap_add_fftconvolve(x, h, mode)
