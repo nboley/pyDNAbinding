@@ -147,6 +147,7 @@ class FixedLengthDNASequences(DNASequences):
                 return np.maximum(fwd_scores, rc_scores, fwd_scores) 
     
     def _init_freq_one_hot_coded_seqs(self):
+        return None
         if self.seq_len > self.max_fft_seq_len:
             return None
         fshape = ( 
