@@ -4,7 +4,9 @@ import random
 
 import pyDNAbinding
 from pyDNAbinding.signal import (
-    multichannel_fftconvolve, multichannel_overlap_add_fftconvolve )
+    multichannel_fftconvolve, 
+    multichannel_overlap_add_fftconvolve, 
+    multichannel_convolve )
 from pyDNAbinding.binding_model import (
     DNASequence, DNASequences, FixedLengthDNASequences, 
     score_coded_seq_with_convolutional_filter )
@@ -77,7 +79,7 @@ def test_my_fft_convolve():
         my = multichannel_fftconvolve(x, h)
         theirs = fftconvolve(x, h, mode='valid')[:,0]
         assert np.abs(my - theirs).sum() < 1e-6
-    
+        
     for seq_len in xrange(2, 100):
         for seq in sample_random_seqs(10, seq_len): 
             x = DNASequence(seq).one_hot_coded_seq
@@ -98,6 +100,9 @@ def compare_convolve_speeds(x, h):
     def test_overlap_add():
         return multichannel_overlap_add_fftconvolve(x, h, mode='valid')
 
+    def test_my_convolve():
+        return multichannel_convolve(x, h, mode='valid')
+
     print "SciPY", timeit.timeit(
         lambda: test_scipy(), 
         number=max(1, int(100000/x.shape[0])))
@@ -106,6 +111,9 @@ def compare_convolve_speeds(x, h):
         number=max(1, int(100000/x.shape[0])))
     print "Overlap Add", timeit.timeit(
         lambda: test_overlap_add(), 
+        number=max(1, int(100000/x.shape[0])))
+    print "Mine", timeit.timeit(
+        lambda: test_my_convolve(), 
         number=max(1, int(100000/x.shape[0])))
 
     return
@@ -118,9 +126,9 @@ for seq_len in (100, 1000, 1024, 1500, 2048, 10000):
     print
 
 test_my_fft_convolve()
-#score_seqs()
-#score_selex_model()
-#score_pwm()
-#score_model()
-#score_multiple_seqs()
-#score_multiple_fixed_len_seqs()
+score_seqs()
+score_selex_model()
+score_pwm()
+score_model()
+score_multiple_seqs()
+score_multiple_fixed_len_seqs()

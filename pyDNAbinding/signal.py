@@ -3,6 +3,8 @@ import math
 import numpy as np
 from numpy.fft import rfftn, irfftn
 
+OVERLAP_ADD_BLOCK_POWER = 10
+
 def _next_regular(target):
     """
     Find the next regular number greater than or equal to target.
@@ -69,7 +71,7 @@ def multichannel_fftconvolve(x, h, mode='valid'):
     
     return ret[h_len-1:x_len, num_channels-1]
 
-def multichannel_overlap_add_fftconvolve(x, h, mode='full', block_power=10):
+def multichannel_overlap_add_fftconvolve(x, h, mode='valid'):
     """Given a signal x compute the convolution with h using the overlap-add algorithm.
 
     This is an fft based convolution algorithm optimized to work on a signal x 
@@ -78,12 +80,12 @@ def multichannel_overlap_add_fftconvolve(x, h, mode='full', block_power=10):
     Input:
     x: float array with dimensions (N, num_channel)
     h: float array with dimensions (filter_len, num_channel)
-    mode: full or valid - same profile scipy.convolve 
+    mode: only accepts valid - same profile scipy.convolve 
 
     Returns:
     float array of length N-filter_len+1 (for mode = valid)
     """
-    assert mode in ('full', 'valid')
+    assert mode == 'valid'
     
     # pad x so that the boundaries are dealt with correctly
     x_len = x.shape[0]
@@ -93,11 +95,11 @@ def multichannel_overlap_add_fftconvolve(x, h, mode='full', block_power=10):
     assert x_len >= h_len, \
         "The signal needs to be at least as long as the filter"
     
-    x = np.vstack((np.zeros((h_len, num_channels)), 
-                   x, 
-                   np.zeros((h_len, num_channels))))    
+    #x = np.vstack((np.zeros((h_len, num_channels)), 
+    #               x, 
+    #               np.zeros((h_len, num_channels))))    
     # make sure that the desired block size is long enough to capture the motif
-    block_size = max(2**block_power, h_len)
+    block_size = max(2**OVERLAP_ADD_BLOCK_POWER, h_len)
     N = int(2**math.ceil(np.log2(block_size+h_len-1)))
     step_size = N-h_len+1
     
@@ -110,7 +112,7 @@ def multichannel_overlap_add_fftconvolve(x, h, mode='full', block_power=10):
                      (N, num_channels) )
         y[start:start+N] += yt[:,num_channels-1]
 
-    y = y[h_len:2*h_len+x_len-1]
+    #y = y[h_len:2*h_len+x_len-1]
     if mode == 'full':
         return y
     elif mode == 'valid':
@@ -118,4 +120,13 @@ def multichannel_overlap_add_fftconvolve(x, h, mode='full', block_power=10):
     elif mode == 'same':
         raise NotImplementedError, "'same' mode is not implemented"
 
-multichannel_convolve = multichannel_overlap_add_fftconvolve
+def multichannel_convolve(x, h, mode='valid'):
+    """Calcualte the convolution between a signal and filter.
+
+    """
+    if mode != 'valid':
+        raise NotImplementedError, "'%s' mode is not implemented" % mode
+    if x.shape[0] < 2**(OVERLAP_ADD_BLOCK_POWER+1):
+        return multichannel_fftconvolve(x, h, mode)
+    else:
+        return multichannel_overlap_add_fftconvolve(x, h, mode)

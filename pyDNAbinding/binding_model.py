@@ -29,7 +29,7 @@ def score_coded_seq_with_convolutional_filter(
         return multichannel_convolve(
             np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
     elif direction == ScoreDirection.RC: 
-        return overlap_add_convolve(
+        return multichannel_convolve(
             coded_seq, filt, mode='valid')
     elif direction == ScoreDirection.MAX:
         fwd_scores = multichannel_convolve(
