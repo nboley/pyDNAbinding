@@ -1,10 +1,29 @@
 import numpy as np
 
+from collections import namedtuple
+
 import psycopg2
 conn = psycopg2.connect("host=mitra dbname=cisbp")
 
 from binding_model import (
     ConvolutionalDNABindingModel, EnergeticDNABindingModel, DNABindingModels )
+
+Genome = namedtuple('Genome', ['name', 'revision', 'species', 'filename'])
+def load_genome_metadata(annotation_id):
+    cur = conn.cursor()
+    query = """
+    SELECT name, revision, species, local_filename 
+      FROM genomes 
+     WHERE annotation_id=%s;
+    """
+    cur.execute(query, [annotation_id,])
+    res = cur.fetchall()
+    if len(res) == 0: 
+        raise ValueError, \
+            "No genome exists in the DB with annotation_id '%i' " \
+                % annotation_id
+    assert len(res) == 1
+    return Genome(*(res[0]))
 
 def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
     cur = conn.cursor()    
@@ -35,7 +54,7 @@ def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
     def iter_models():
         for data in cur.fetchall():
             tf_id, motif_id, tf_name, tf_species, pwm = list(data)
-            pwm = np.log2(np.clip(1 - np.array(pwm), 1e-4, 1-1e-4))
+            pwm = -np.log2(np.clip(1 - np.array(pwm), 1e-4, 1-1e-4))
             yield ConvolutionalDNABindingModel(
                 pwm, 
                 tf_id=tf_id, 
