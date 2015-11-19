@@ -368,20 +368,18 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         # add the encoding type
         rv['encoded_type'] = self.encoding_type
         # add the consensus energy
-        rv['ref_energy'] = self.ref_energy
+        rv['ref_energy'] = float(self.ref_energy)
         # add the ddg array
-        rv['ddg_array'] = self.ddg_array
+        rv['ddg_array'] = self.ddg_array.round(4).tolist()
         return rv
 
     def yaml_str(self):
-        return yaml.dump(self._build_repr_dict())
+        return yaml.dump(dict(self._build_repr_dict()))
     
     def __init__(self,
                  ref_energy,
                  ddg_array,
                  **kwargs):
-        DNABindingModel._init_meta_data(self, kwargs)
-
         # store the model params
         self.ref_energy = ref_energy
         self.ddg_array = ddg_array.view(DeltaDeltaGArray)
@@ -392,4 +390,5 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         convolutional_filter = self.ddg_array.copy()
         convolutional_filter[0,:] += ref_energy
         convolutional_filter *= -1
-        ConvolutionalDNABindingModel.__init__(self, convolutional_filter)
+        ConvolutionalDNABindingModel.__init__(
+            self, convolutional_filter, **kwargs)
