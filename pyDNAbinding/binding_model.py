@@ -394,7 +394,8 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
                  **kwargs):
         # store the model params
         self.ref_energy = ref_energy
-        self.ddg_array = np.array(ddg_array).view(DeltaDeltaGArray)
+        self.ddg_array = np.array(ddg_array, dtype='float32').view(
+            DeltaDeltaGArray)
         
         # add the reference energy to every entry of the convolutional 
         # filter, and then multiply by negative 1 (so that higher scores 
