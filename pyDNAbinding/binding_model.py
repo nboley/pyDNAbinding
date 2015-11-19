@@ -1,7 +1,12 @@
 import numpy as np
+import yaml
+
+from collections import OrderedDict
+
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
 
+from misc import logistic
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
 
 class ScoreDirection():
@@ -195,20 +200,6 @@ class FixedLengthDNASequences(DNASequences):
         self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
         self.freq_one_hot_coded_seqs = self._init_freq_one_hot_coded_seqs()
 
-
-class DNABindingModel(object):
-    def score_binding_sites(self, seq):
-        """Score each binding site in seq. 
-        
-        """
-        raise NotImplementedError, \
-            "Scoring method is model type specific and not implemented for the base class."
-
-    def _init_meta_data(self, meta_data):
-        for key, value in meta_data.iteritems():
-            setattr(self, key, value)
-        return
-
 class DNABindingModels(object):
     """Container for DNABindingModel objects
 
@@ -225,6 +216,27 @@ class DNABindingModels(object):
     def __init__(self, models):
         self._models = list(models)
         assert all(isinstance(mo, DNABindingModel) for mo in models)
+
+class DNABindingModel(object):
+    def score_binding_sites(self, seq):
+        """Score each binding site in seq. 
+        
+        """
+        raise NotImplementedError, \
+            "Scoring method is model type specific and not implemented for the base class."
+
+    def _init_meta_data(self, meta_data):
+        self._meta_data = meta_data
+        for key, value in meta_data.iteritems():
+            setattr(self, key, value)
+        return
+
+    @property
+    def meta_data(self):
+        return self._meta_data
+    
+    def iter_meta_data(self):
+        return iter(self._meta_data.iteritems())
 
 class ConvolutionalDNABindingModel(DNABindingModel):
     """Store a DNA binding model that can be represented as a convolution. 
@@ -263,8 +275,13 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         DNABindingModel._init_meta_data(self, kwargs)
 
         assert len(convolutional_filter.shape) == 2
-        assert convolutional_filter.shape[1] == 4, \
-            "Binding model must have shape (motif_len, 4)"
+
+        if convolutional_filter.shape[1] == 4:
+            self.encoding_type = 'ONE_HOT'
+        elif convolutional_filter.shape[1] == 10:
+            self.encoding_type = 'ONE_HOT_PLUS_SHAPE'
+        else:
+            raise TypeError, "Unrecognized ddg_array type - expecting one-hot (Nx4) or one-hot-plus-shape (NX10)"
 
         self.binding_site_len = convolutional_filter.shape[0]
         self.convolutional_filter = convolutional_filter
@@ -298,6 +315,26 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 class DeltaDeltaGArray(np.ndarray):
     pass    
 
+class PWMBindingModel(ConvolutionalDNABindingModel):
+    def __init__(self, *args, **kwargs):
+        ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
+        if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
+            raise TypeError, "PWM rows must sum to one."
+        if self.convolutional_filter.shape[1] != 4:
+            raise TypeError, "PWMs must have dimension NX4."
+        return 
+
+    def build_energetic_model(self, include_shape=False):
+        ref_energy = 0.0
+        energies = np.zeros(
+            (self.motif_len, 4 + (6 if include_shape else 0)),
+            dtype='float32')
+        for i, base_energies in enumerate(self.convolutional_filter):
+            for j, base_energy in enumerate(base_energies[1:]):
+                energies[i, j+1] = base_energy - base_energies[0]
+            ref_energy += base_energies[0]
+        return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
+
 class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     """A convolutional binding model where the binding site scores are the physical binding affinity.
 
@@ -314,13 +351,40 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     def mean_energy(self):
         return self.sum()/(len(self)/self.motif_len)
 
-    def __init__(self, ref_energy, ddg_array, **kwargs):
+    def build_pwm(self, chem_pot):
+        pwm = np.zeros((4, self.motif_len), dtype=float)
+        mean_energy = ref_energy + chem_pot + self.mean_energy
+        for i, base_energies in enumerate(self.ddg_array):
+            base_mut_energies = mean_energy + base_energies.mean() - base_energies 
+            occs = logistic(base_mut_energies)
+            pwm[:,i] = occs/occs.sum()
+        return pwm
+
+    def _build_repr_dict(self):
+        # first write the meta data
+        rv = OrderedDict()
+        for key, value in self.iter_meta_data():
+            rv[key] = value
+        # add the encoding type
+        rv['encoded_type'] = self.encoding_type
+        # add the consensus energy
+        rv['ref_energy'] = self.ref_energy
+        # add the ddg array
+        rv['ddg_array'] = self.ddg_array
+        return rv
+
+    def yaml_str(self):
+        return yaml.dump(self._build_repr_dict())
+    
+    def __init__(self,
+                 ref_energy,
+                 ddg_array,
+                 **kwargs):
         DNABindingModel._init_meta_data(self, kwargs)
 
         # store the model params
         self.ref_energy = ref_energy
         self.ddg_array = ddg_array.view(DeltaDeltaGArray)
-        assert self.ddg_array.shape[1] == 4
         
         # add the reference energy to every entry of the convolutional 
         # filter, and then multiply by negative 1 (so that higher scores 
