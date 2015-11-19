@@ -218,6 +218,8 @@ class DNABindingModels(object):
         assert all(isinstance(mo, DNABindingModel) for mo in models)
 
 class DNABindingModel(object):
+    model_type = 'EnergeticDNABindingModel'
+
     def score_binding_sites(self, seq):
         """Score each binding site in seq. 
         
@@ -254,6 +256,7 @@ class ConvolutionalDNABindingModel(DNABindingModel):
     if we encode DNA using the one hot encoding (e.g. TAAT is 
     represented by [[0,0,0,1], [1,0,0,0], [1,0,0,0], [0,0,0,1]]).
     """
+    model_type = 'ConvolutionalDNABindingModel'
     
     @property
     def consensus_seq(self):
@@ -316,6 +319,8 @@ class DeltaDeltaGArray(np.ndarray):
     pass    
 
 class PWMBindingModel(ConvolutionalDNABindingModel):
+    model_type = 'PWMbindingModel'
+    
     def __init__(self, *args, **kwargs):
         ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
         if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
@@ -339,6 +344,8 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     """A convolutional binding model where the binding site scores are the physical binding affinity.
 
     """
+    model_type = 'EnergeticDNABindingModel'
+
     @property
     def min_energy(self, ref_energy):
         return self.ref_energy + self.ddg_array.min(1).sum()
@@ -363,18 +370,23 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     def _build_repr_dict(self):
         # first write the meta data
         rv = OrderedDict()
+        rv['model_type'] = self.model_type
         for key, value in self.iter_meta_data():
             rv[key] = value
         # add the encoding type
-        rv['encoded_type'] = self.encoding_type
+        rv['encoding_type'] = self.encoding_type
         # add the consensus energy
         rv['ref_energy'] = float(self.ref_energy)
         # add the ddg array
         rv['ddg_array'] = self.ddg_array.round(4).tolist()
         return rv
 
+    @property
     def yaml_str(self):
         return yaml.dump(dict(self._build_repr_dict()))
+
+    def save(self, ofstream):
+        ofstream.write(self.yaml_str)
     
     def __init__(self,
                  ref_energy,
@@ -382,7 +394,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
                  **kwargs):
         # store the model params
         self.ref_energy = ref_energy
-        self.ddg_array = ddg_array.view(DeltaDeltaGArray)
+        self.ddg_array = np.array(ddg_array).view(DeltaDeltaGArray)
         
         # add the reference energy to every entry of the convolutional 
         # filter, and then multiply by negative 1 (so that higher scores 
@@ -392,3 +404,10 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         convolutional_filter *= -1
         ConvolutionalDNABindingModel.__init__(
             self, convolutional_filter, **kwargs)
+
+def load_binding_model(fname):
+    with open(fname) as fp:
+        data = yaml.load(fp)
+        object_type = globals()[data['model_type']]
+        del data['model_type']
+        return object_type(**data)
