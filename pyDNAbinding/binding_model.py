@@ -217,6 +217,13 @@ class DNABindingModels(object):
         self._models = list(models)
         assert all(isinstance(mo, DNABindingModel) for mo in models)
 
+    @property
+    def yaml_str(self):
+        return yaml.dump( [dict(mo._build_repr_dict()) for mo in self] )
+
+    def save(self, ofstream):
+        ofstream.write(self.yaml_str)
+
 class DNABindingModel(object):
     model_type = 'EnergeticDNABindingModel'
 
