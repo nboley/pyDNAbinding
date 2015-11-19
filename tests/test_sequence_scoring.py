@@ -142,10 +142,12 @@ def profile_multi_convolve(seq_len, n_seqs):
     print "Merged", timeit.timeit(
         lambda: [seqs.score_binding_sites(h, 'MAX') for h in hs], 
         number=1)
-    print "Optimized", timeit.timeit(
-        lambda: [(seqs._clever_score_binding_sites(h, True),
-                  seqs._clever_score_binding_sites(h, False)) for h in hs], 
-        number=1)
+    ### Disabled until the multi-threading issue is fixed
+    #print "Optimized", timeit.timeit(
+    #    lambda: [(seqs._clever_score_binding_sites(h, True),
+    #              seqs._clever_score_binding_sites(h, False)) for h in hs], 
+    #    number=1)
+
 """
 test_my_fft_convolve()
 score_seqs()
@@ -154,7 +156,6 @@ score_pwm()
 score_model()
 score_multiple_seqs()
 score_multiple_fixed_len_seqs()
-
 profile_convolve_speeds()
-"""
 profile_multi_convolve(1000, 100)
+"""
