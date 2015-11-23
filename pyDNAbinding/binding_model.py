@@ -2,6 +2,7 @@ import numpy as np
 import yaml
 
 from collections import OrderedDict
+from itertools import izip
 
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
@@ -56,7 +57,7 @@ class DNASequence(object):
     def __init__(self, seq, one_hot_coded_seq=None):
         self.seq = seq
 
-        if one_hot_coded_seq == None:
+        if one_hot_coded_seq is None:
             one_hot_coded_seq = one_hot_encode_sequence(seq)
         self.one_hot_coded_seq = one_hot_coded_seq
 
@@ -109,7 +110,7 @@ class FixedLengthDNASequences(DNASequences):
     max_fft_seq_len = 500000
     
     def __iter__(self):
-        for seq, coded_seq in izip(self.seqs, self.one_hot_encoded_seqs):
+        for seq, coded_seq in izip(self._seqs, self.one_hot_coded_seqs):
             yield DNASequence(seq, coded_seq.view(OneHotCodedDNASeq))
         return
 
