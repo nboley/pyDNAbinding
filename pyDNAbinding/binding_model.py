@@ -323,6 +323,74 @@ class ConvolutionalDNABindingModel(DNABindingModel):
             rv.append(self.score_binding_sites(one_hot_coded_seq, direction))
         return rv
 
+class ReducedDeltaDeltaGArray(np.ndarray):
+    def calc_base_contributions(self):
+        base_contribs = np.zeros((self.motif_len, 4))
+        base_contribs[:,1:4] = self.base_portion.T
+        return base_contribs
+
+    def calc_normalized_base_conts(self, ref_energy):
+        base_contribs = self.calc_base_contributions()
+        ref_energy += base_contribs.min(1).sum()
+        for i, min_energy in enumerate(base_contribs.min(1)):
+            base_contribs[i,:] -= min_energy
+        return ref_energy, base_contribs
+    
+    def calc_min_energy(self, ref_energy):
+        base_contribs = self.calc_base_contributions()
+        return ref_energy + base_contribs.min(1).sum()
+
+    def calc_max_energy(self, ref_energy):
+        base_contribs = self.calc_base_contributions()
+        return ref_energy + base_contribs.max(1).sum()
+
+    def reverse_complement(self):
+        rc_array = np.zeros(self.shape, dtype=self.dtype)
+        ts_cont = float(self[2,:].sum())
+        rc_array[(0,1),:] = self[(1,0),:]
+        rc_array[:,:3] -= self[2,:3]
+        return ts_cont, rc_array.view(DeltaDeltaGArray)[:,::-1]
+
+    @property
+    def base_portion(self):
+        return self[:3,:]
+    
+    @property
+    def shape_portion(self):
+        assert self.shape[0] == 9
+        return self[3:,:]
+
+    @property
+    def mean_energy(self):
+        return self.sum()/self.shape[0]
+    
+    @property
+    def motif_len(self):
+        return self.shape[1]
+
+    def consensus_seq(self):
+        base_contribs = self.calc_base_contributions()
+        return "".join( 'ACGT'[x] for x in np.argmin(base_contribs, axis=1) )
+
+    def summary_str(self, ref_energy):
+        rv = []
+        rv.append(str(self.consensus_seq()))
+        rv.append("Ref: %s" % ref_energy)
+        rv.append(
+            "Mean: %s" % (ref_energy + self.mean_energy))
+        rv.append(
+            "Min: %s" % self.calc_min_energy(ref_energy))
+        rv.append("".join("{:>10}".format(x) for x in [
+            'A', 'C', 'G', 'T', 'ProT', 'MGW', 'LHelT', 'RHelT', 'LRoll', 'RRoll']))
+        for base_contribs in self.T.tolist():
+            rv.append( 
+                "".join(["      0.00",] + [
+                    "{:10.2f}".format(x) for x in base_contribs]) 
+            )
+        return "\n".join(rv)
+        pass
+
+
 class DeltaDeltaGArray(np.ndarray):
     pass    
 
@@ -388,7 +456,19 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         # add the ddg array
         rv['ddg_array'] = self.ddg_array.round(4).tolist()
         return rv
-
+    
+    def build_all_As_affinity_and_ddg_array(self):        
+        all_As_affinity, ddg_array = self.ref_energy, self.ddg_array
+        energies = np.zeros(
+            (self.motif_len, self.convolutional_filter.shape[1]),
+            dtype='float32')
+        for i, base_energies in enumerate(self.motif_data):
+            energies[3:] = base_energies[4:]
+            for j, base_energy in enumerate(base_energies[1:4]):
+                energies[i, j] = base_energy - base_energies[0]
+            all_As_affinity += base_energies[0]
+        return all_As_affinity, energies.T.view(ReducedDeltaDeltaGArray)
+    
     @property
     def yaml_str(self):
         return yaml.dump(dict(self._build_repr_dict()))
