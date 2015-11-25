@@ -71,6 +71,9 @@ class DNASequences(object):
     """Container for DNASequence objects.
 
     """
+    def __getitem__(self, index):
+        return self._seqs[index]
+
     def __iter__(self):
         return iter(self._seqs)
         
@@ -323,6 +326,115 @@ class ConvolutionalDNABindingModel(DNABindingModel):
             rv.append(self.score_binding_sites(one_hot_coded_seq, direction))
         return rv
 
+class PWMBindingModel(ConvolutionalDNABindingModel):
+    model_type = 'PWMbindingModel'
+    
+    def __init__(self, *args, **kwargs):
+        ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
+        if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
+            raise TypeError, "PWM rows must sum to one."
+        if self.convolutional_filter.shape[1] != 4:
+            raise TypeError, "PWMs must have dimension NX4."
+        return 
+
+    def build_energetic_model(self, include_shape=False):
+        ref_energy = 0.0
+        energies = np.zeros(
+            (self.motif_len, 4 + (6 if include_shape else 0)),
+            dtype='float32')
+        for i, base_energies in enumerate(np.log2(1-self.convolutional_filter)):
+            for j, base_energy in enumerate(base_energies[1:]):
+                energies[i, j+1] = base_energy - base_energies[0]
+            ref_energy += base_energies[0]
+        return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
+
+class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
+    """A convolutional binding model where the binding site scores are the physical binding affinity.
+
+    """
+    model_type = 'EnergeticDNABindingModel'
+
+    @property
+    def min_energy(self, ref_energy):
+        return self.ref_energy + self.ddg_array.min(1).sum()
+
+    @property
+    def max_energy(self, ref_energy):
+        return self.ref_energy + self.ddg_array.max(1).sum()
+
+    @property
+    def mean_energy(self):
+        return self.sum()/(len(self)/self.motif_len)
+
+    def build_pwm(self, chem_pot):
+        pwm = np.zeros((4, self.motif_len), dtype=float)
+        mean_energy = ref_energy + chem_pot + self.mean_energy
+        for i, base_energies in enumerate(self.ddg_array):
+            base_mut_energies = mean_energy + base_energies.mean() - base_energies 
+            occs = logistic(base_mut_energies)
+            pwm[:,i] = occs/occs.sum()
+        return pwm
+
+    def _build_repr_dict(self):
+        # first write the meta data
+        rv = OrderedDict()
+        rv['model_type'] = self.model_type
+        for key, value in self.iter_meta_data():
+            rv[key] = value
+        # add the encoding type
+        rv['encoding_type'] = self.encoding_type
+        # add the consensus energy
+        rv['ref_energy'] = float(self.ref_energy)
+        # add the ddg array
+        rv['ddg_array'] = self.ddg_array.round(4).tolist()
+        return rv
+    
+    def build_all_As_affinity_and_ddg_array(self):        
+        all_As_affinity, ddg_array = self.ref_energy, self.ddg_array
+        energies = np.zeros(
+            (self.motif_len, self.convolutional_filter.shape[1]-1),
+            dtype='float32')
+        for i, base_energies in enumerate(ddg_array):
+            # when needed, deal with the non-one-hot-coded features
+            if len(base_energies) > 4:
+                energies[i,3:] = base_energies[4:]
+            for j, base_energy in enumerate(base_energies[1:4]):
+                energies[i, j] = base_energy - base_energies[0]
+            all_As_affinity += base_energies[0]
+        return all_As_affinity, energies.T.view(ReducedDeltaDeltaGArray)
+    
+    @property
+    def yaml_str(self):
+        return yaml.dump(dict(self._build_repr_dict()))
+
+    def save(self, ofstream):
+        ofstream.write(self.yaml_str)
+    
+    def __init__(self,
+                 ref_energy,
+                 ddg_array,
+                 **kwargs):
+        # store the model params
+        self.ref_energy = ref_energy
+        self.ddg_array = np.array(ddg_array, dtype='float32').view(
+            DeltaDeltaGArray)
+        
+        # add the reference energy to every entry of the convolutional 
+        # filter, and then multiply by negative 1 (so that higher scores 
+        # correspond to higher binding affinity )
+        convolutional_filter = self.ddg_array.copy()
+        convolutional_filter[0,:] += ref_energy
+        convolutional_filter *= -1
+        ConvolutionalDNABindingModel.__init__(
+            self, convolutional_filter, **kwargs)
+
+def load_binding_model(fname):
+    with open(fname) as fp:
+        data = yaml.load(fp)
+        object_type = globals()[data['model_type']]
+        del data['model_type']
+        return object_type(**data)
+
 class ReducedDeltaDeltaGArray(np.ndarray):
     def calc_base_contributions(self):
         base_contribs = np.zeros((self.motif_len, 4))
@@ -393,110 +505,3 @@ class ReducedDeltaDeltaGArray(np.ndarray):
 
 class DeltaDeltaGArray(np.ndarray):
     pass    
-
-class PWMBindingModel(ConvolutionalDNABindingModel):
-    model_type = 'PWMbindingModel'
-    
-    def __init__(self, *args, **kwargs):
-        ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
-        if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
-            raise TypeError, "PWM rows must sum to one."
-        if self.convolutional_filter.shape[1] != 4:
-            raise TypeError, "PWMs must have dimension NX4."
-        return 
-
-    def build_energetic_model(self, include_shape=False):
-        ref_energy = 0.0
-        energies = np.zeros(
-            (self.motif_len, 4 + (6 if include_shape else 0)),
-            dtype='float32')
-        for i, base_energies in enumerate(np.log2(1-self.convolutional_filter)):
-            for j, base_energy in enumerate(base_energies[1:]):
-                energies[i, j+1] = base_energy - base_energies[0]
-            ref_energy += base_energies[0]
-        return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
-
-class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
-    """A convolutional binding model where the binding site scores are the physical binding affinity.
-
-    """
-    model_type = 'EnergeticDNABindingModel'
-
-    @property
-    def min_energy(self, ref_energy):
-        return self.ref_energy + self.ddg_array.min(1).sum()
-
-    @property
-    def max_energy(self, ref_energy):
-        return self.ref_energy + self.ddg_array.max(1).sum()
-
-    @property
-    def mean_energy(self):
-        return self.sum()/(len(self)/self.motif_len)
-
-    def build_pwm(self, chem_pot):
-        pwm = np.zeros((4, self.motif_len), dtype=float)
-        mean_energy = ref_energy + chem_pot + self.mean_energy
-        for i, base_energies in enumerate(self.ddg_array):
-            base_mut_energies = mean_energy + base_energies.mean() - base_energies 
-            occs = logistic(base_mut_energies)
-            pwm[:,i] = occs/occs.sum()
-        return pwm
-
-    def _build_repr_dict(self):
-        # first write the meta data
-        rv = OrderedDict()
-        rv['model_type'] = self.model_type
-        for key, value in self.iter_meta_data():
-            rv[key] = value
-        # add the encoding type
-        rv['encoding_type'] = self.encoding_type
-        # add the consensus energy
-        rv['ref_energy'] = float(self.ref_energy)
-        # add the ddg array
-        rv['ddg_array'] = self.ddg_array.round(4).tolist()
-        return rv
-    
-    def build_all_As_affinity_and_ddg_array(self):        
-        all_As_affinity, ddg_array = self.ref_energy, self.ddg_array
-        energies = np.zeros(
-            (self.motif_len, self.convolutional_filter.shape[1]),
-            dtype='float32')
-        for i, base_energies in enumerate(self.motif_data):
-            energies[3:] = base_energies[4:]
-            for j, base_energy in enumerate(base_energies[1:4]):
-                energies[i, j] = base_energy - base_energies[0]
-            all_As_affinity += base_energies[0]
-        return all_As_affinity, energies.T.view(ReducedDeltaDeltaGArray)
-    
-    @property
-    def yaml_str(self):
-        return yaml.dump(dict(self._build_repr_dict()))
-
-    def save(self, ofstream):
-        ofstream.write(self.yaml_str)
-    
-    def __init__(self,
-                 ref_energy,
-                 ddg_array,
-                 **kwargs):
-        # store the model params
-        self.ref_energy = ref_energy
-        self.ddg_array = np.array(ddg_array, dtype='float32').view(
-            DeltaDeltaGArray)
-        
-        # add the reference energy to every entry of the convolutional 
-        # filter, and then multiply by negative 1 (so that higher scores 
-        # correspond to higher binding affinity )
-        convolutional_filter = self.ddg_array.copy()
-        convolutional_filter[0,:] += ref_energy
-        convolutional_filter *= -1
-        ConvolutionalDNABindingModel.__init__(
-            self, convolutional_filter, **kwargs)
-
-def load_binding_model(fname):
-    with open(fname) as fp:
-        data = yaml.load(fp)
-        object_type = globals()[data['model_type']]
-        del data['model_type']
-        return object_type(**data)
