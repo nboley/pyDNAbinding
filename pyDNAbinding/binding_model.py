@@ -7,7 +7,7 @@ from itertools import izip
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
 
-from misc import logistic
+from misc import logistic, R, T
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
 
 class ScoreDirection():
@@ -401,7 +401,8 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
             for j, base_energy in enumerate(base_energies[1:4]):
                 energies[i, j] = base_energy - base_energies[0]
             all_As_affinity += base_energies[0]
-        return all_As_affinity, energies.T.view(ReducedDeltaDeltaGArray)
+        return np.array([all_As_affinity,], dtype='float32')[0], \
+            energies.T.astype('float32').view(ReducedDeltaDeltaGArray)
     
     @property
     def yaml_str(self):
@@ -502,6 +503,33 @@ class ReducedDeltaDeltaGArray(np.ndarray):
         return "\n".join(rv)
         pass
 
-
 class DeltaDeltaGArray(np.ndarray):
     pass    
+
+def est_chem_potential_from_affinities(affinities, dna_conc, prot_conc):
+    """Estimate chemical affinity for round 1.
+
+    [TF] - [TF]_0 - \sum{all seq}{ [s_i]_0[TF](1/{[TF]+exp(delta_g)}) = 0  
+    exp{u} - [TF]_0 - \sum{i}{ 1/(1+exp(G_i)exp(-)
+    """    
+    def calc_bnd_frac(affinities, chem_pot):
+        return calc_occ(chem_pot, affinities).mean()
+    
+    def f(u):
+        bnd_frac = calc_bnd_frac(affinities, u)
+        #print u, bnd_frac, prot_conc, prot_conc*bnd_frac, math.exp(u), \
+        #    dna_conc*bnd_frac + math.exp(u)
+        return prot_conc - math.exp(u) - dna_conc*bnd_frac
+        #return prot_conc - math.exp(u) - prot_conc*bnd_frac
+
+    min_u = -1000 
+    max_u = np.log(prot_conc/(R*T))
+    rv = brentq(f, min_u, max_u, xtol=1e-4)
+    #print "Result: ", rv
+    return rv
+
+def est_chem_potential(
+        seqs, binding_model, dna_conc, prot_conc):
+    # calculate the binding affinities for each sequence
+    affinities = -(seqs.score_binding_sites(binding_model, 'MAX').max(1))
+    return est_chem_potential_from_affinities(affinities, dna_conc, prot_conc)
