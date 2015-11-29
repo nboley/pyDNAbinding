@@ -1,13 +1,18 @@
-import numpy as np
-import yaml
+import math
 
 from collections import OrderedDict
 from itertools import izip
 
+import numpy as np
+import yaml
+
+
+from scipy.optimize import brentq
+
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
 
-from misc import logistic, R, T
+from misc import logistic, R, T, calc_occ
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
 
 class ScoreDirection():
