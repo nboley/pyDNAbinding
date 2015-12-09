@@ -351,7 +351,7 @@ class PWMBindingModel(ConvolutionalDNABindingModel):
         energies = np.zeros(
             (self.motif_len, 4 + (6 if include_shape else 0)),
             dtype='float32')
-        for i, base_energies in enumerate(np.log2(1-self.convolutional_filter)):
+        for i, base_energies in enumerate(-self.convolutional_filter):
             for j, base_energy in enumerate(base_energies):
                 energies[i, j] = base_energy
         return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
