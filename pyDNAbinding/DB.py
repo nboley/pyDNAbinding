@@ -6,7 +6,7 @@ import psycopg2
 conn = psycopg2.connect("host=mitra dbname=cisbp")
 
 from binding_model import (
-    ConvolutionalDNABindingModel, EnergeticDNABindingModel, DNABindingModels )
+    PWMBindingModel, EnergeticDNABindingModel, DNABindingModels )
 
 Genome = namedtuple('Genome', ['name', 'revision', 'species', 'filename'])
 def load_genome_metadata(annotation_id):
@@ -54,8 +54,8 @@ def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
     def iter_models():
         for data in cur.fetchall():
             tf_id, motif_id, tf_name, tf_species, pwm = list(data)
-            pwm = -np.log2(np.clip(1 - np.array(pwm), 1e-4, 1-1e-4))
-            yield ConvolutionalDNABindingModel(
+            
+            yield PWMBindingModel(
                 pwm, 
                 tf_id=tf_id, 
                 motif_id=motif_id, 

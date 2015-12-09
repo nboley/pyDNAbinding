@@ -334,12 +334,16 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 class PWMBindingModel(ConvolutionalDNABindingModel):
     model_type = 'PWMbindingModel'
     
-    def __init__(self, *args, **kwargs):
-        ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
-        if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
+    def __init__(self, pwm, *args, **kwargs):
+        self.pwm = np.array(pwm, dtype='float32')
+        if not (self.pwm.sum(1).round(6) == 1.0).all():
             raise TypeError, "PWM rows must sum to one."
-        if self.convolutional_filter.shape[1] != 4:
+        if self.pwm.shape[1] != 4:
             raise TypeError, "PWMs must have dimension NX4."
+        convolutional_filter = -np.log2(
+            np.clip(1 - np.array(pwm), 1e-6, 1-1e-6))
+        ConvolutionalDNABindingModel.__init__(
+            self, convolutional_filter, *args, **kwargs)
         return 
 
     def build_energetic_model(self, include_shape=False):
