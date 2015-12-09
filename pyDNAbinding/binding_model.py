@@ -527,7 +527,7 @@ class DeltaDeltaGArray(np.ndarray):
 
     @property
     def mean_energy(self):
-        return self.base_portion.sum()/(4*self.motif_len)
+        return self.base_portion.sum()/4
     
     @property
     def motif_len(self):
