@@ -306,6 +306,10 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         self.convolutional_filter = convolutional_filter
         self.shape = self.convolutional_filter.shape
 
+    @property
+    def convolutional_filter_base_portion(self):
+        return self.convolutional_filter[:,:4]
+
     def score_binding_sites(self, seq, direction):
         """Score all binding sites in seq.
         
@@ -320,7 +324,7 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         else:
             assert False, "Unrecognized sequence type '%s'" % str(type(seq))
         return score_coded_seq_with_convolutional_filter(
-            coded_seq, self.convolutional_filter, direction=direction)
+            coded_seq, self.convolutional_filter_base_portion, direction=direction)
 
     def score_seqs_binding_sites(self, seqs, direction):
         """Score all binding sites in all sequences.
