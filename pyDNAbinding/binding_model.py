@@ -369,7 +369,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
 
     @property
     def mean_energy(self):
-        return self.sum()/(len(self)/self.motif_len)
+        return self.ref_energy + self.ddg_array.sum()/4
 
     def build_pwm(self, chem_pot):
         pwm = np.zeros((4, self.motif_len), dtype=float)
