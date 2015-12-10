@@ -334,12 +334,16 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 class PWMBindingModel(ConvolutionalDNABindingModel):
     model_type = 'PWMbindingModel'
     
-    def __init__(self, *args, **kwargs):
-        ConvolutionalDNABindingModel.__init__(self, *args, **kwargs)
-        if not (self.convolutional_filter.sum(1).round(6) == 1.0).all():
+    def __init__(self, pwm, *args, **kwargs):
+        self.pwm = np.array(pwm, dtype='float32')
+        if not (self.pwm.sum(1).round(6) == 1.0).all():
             raise TypeError, "PWM rows must sum to one."
-        if self.convolutional_filter.shape[1] != 4:
+        if self.pwm.shape[1] != 4:
             raise TypeError, "PWMs must have dimension NX4."
+        convolutional_filter = -np.log2(
+            np.clip(1 - np.array(pwm), 1e-6, 1-1e-6))
+        ConvolutionalDNABindingModel.__init__(
+            self, convolutional_filter, *args, **kwargs)
         return 
 
     def build_energetic_model(self, include_shape=False):
@@ -347,10 +351,9 @@ class PWMBindingModel(ConvolutionalDNABindingModel):
         energies = np.zeros(
             (self.motif_len, 4 + (6 if include_shape else 0)),
             dtype='float32')
-        for i, base_energies in enumerate(np.log2(1-self.convolutional_filter)):
-            for j, base_energy in enumerate(base_energies[1:]):
-                energies[i, j+1] = base_energy - base_energies[0]
-            ref_energy += base_energies[0]
+        for i, base_energies in enumerate(-self.convolutional_filter):
+            for j, base_energy in enumerate(base_energies):
+                energies[i, j] = base_energy
         return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
 
 class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
@@ -506,19 +509,71 @@ class ReducedDeltaDeltaGArray(np.ndarray):
                     "{:10.2f}".format(x) for x in base_contribs]) 
             )
         return "\n".join(rv)
-        pass
 
 class DeltaDeltaGArray(np.ndarray):
-    pass    
+    def calc_min_energy(self, ref_energy):
+        return ref_energy + self.min(1).sum()
 
-def est_chem_potential_from_affinities(affinities, dna_conc, prot_conc):
+    def calc_max_energy(self, ref_energy):
+        return ref_energy + self.max(1).sum()
+
+    def reverse_complement(self):
+        return self[::-1,::-1].view(DeltaDeltaGArray)
+
+    @property
+    def base_portion(self):
+        return self[:,:4]
+    
+    @property
+    def shape_portion(self):
+        assert self.shape[0] == 10
+        return self[:,4:]
+
+    @property
+    def mean_energy(self):
+        return self.base_portion.sum()/4
+    
+    @property
+    def motif_len(self):
+        return self.shape[0]
+
+    def consensus_seq(self):
+        return "".join( 'ACGT'[x] for x in np.argmin(self, axis=1) )
+
+    def summary_str(self, ref_energy):
+        rv = []
+        rv.append(str(self.consensus_seq()))
+        rv.append("Ref: %s" % ref_energy)
+        rv.append(
+            "Mean: %s" % (ref_energy + self.mean_energy))
+        rv.append(
+            "Min: %s" % self.calc_min_energy(ref_energy))
+        rv.append("".join("{:>10}".format(x) for x in [
+            'A', 'C', 'G', 'T', 'ProT', 'MGW', 'LHelT', 'RHelT', 'LRoll', 'RRoll']))
+        for base_contribs in self.tolist():
+            rv.append( 
+                "".join(["{:10.2f}".format(x) for x in base_contribs]) 
+            )
+        return "\n".join(rv)
+
+def est_chem_potential_from_affinities(
+        affinities, dna_conc, prot_conc, weights=None):
     """Estimate chemical affinity for round 1.
+
+    The occupancies are weighted by weights - which defaults to uniform. 
+    This is useful for esitmating the chemical potential fromt he affintiy
+    density function, rather than from a sample.  
 
     [TF] - [TF]_0 - \sum{all seq}{ [s_i]_0[TF](1/{[TF]+exp(delta_g)}) = 0  
     exp{u} - [TF]_0 - \sum{i}{ 1/(1+exp(G_i)exp(-)
     """    
+    if weights == None:
+        weights = np.ones(affinities.shape, dtype=float)/len(affinities)
+    assert weights.sum().round(6) == 1.0
+
     def calc_bnd_frac(affinities, chem_pot):
-        return calc_occ(chem_pot, affinities).mean()
+        # since the weights default to unfiform, this is the mean on average
+        return (weights*calc_occ(chem_pot, affinities)).sum()
     
     def f(u):
         bnd_frac = calc_bnd_frac(affinities, u)
@@ -528,7 +583,7 @@ def est_chem_potential_from_affinities(affinities, dna_conc, prot_conc):
         #return prot_conc - math.exp(u) - prot_conc*bnd_frac
 
     min_u = -1000 
-    max_u = np.log(prot_conc/(R*T))
+    max_u = 100+np.log(prot_conc/(R*T))
     rv = brentq(f, min_u, max_u, xtol=1e-4)
     #print "Result: ", rv
     return rv
@@ -536,5 +591,10 @@ def est_chem_potential_from_affinities(affinities, dna_conc, prot_conc):
 def est_chem_potential(
         seqs, binding_model, dna_conc, prot_conc):
     # calculate the binding affinities for each sequence
-    affinities = -(seqs.score_binding_sites(binding_model, 'MAX').max(1))
+    if isinstance(seqs, DNASequences):
+        affinities = -(seqs.score_binding_sites(binding_model, 'MAX').max(1))
+    else:
+        affinities = -(np.array(
+            binding_model.score_seqs_binding_sites(seqs, 'MAX')).max(1))
+    print len(affinities), affinities.min(), affinities.mean(), affinities.max()
     return est_chem_potential_from_affinities(affinities, dna_conc, prot_conc)
