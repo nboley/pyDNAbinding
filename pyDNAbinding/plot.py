@@ -1,6 +1,7 @@
 import re
 
 from math import ceil
+from math import floor
 
 from itertools import izip
 
@@ -207,20 +208,32 @@ def plot_bases(letter_heights, ylab='bits'):
     ylab: x axis label
     """
     assert letter_heights.shape[1] == 4
-    assert letter_heights.min() >= 0
     
     fig = pyplot.figure()
 
     x_range = [1, letter_heights.shape[0]]
-    y_range = [0, int(ceil(letter_heights.sum(1).max()))]
+
+    pos_heights = np.copy(letter_heights)
+    pos_heights[letter_heights < 0] = 0
+
+    neg_heights = np.copy(letter_heights)
+    neg_heights[letter_heights > 0] = 0
+
+    y_range = [int(ceil(neg_heights.sum(axis=1).min() - 1)),
+               int(floor(pos_heights.sum(axis=1).max() + 1))]
 
     ax = fig.add_subplot(111)
     for x_pos, heights in enumerate(letter_heights):
         letters_and_heights = sorted(izip(heights, 'ACGT'))
-        y_pos = 0.0
+        y_pos_pos = 0.0
+        y_neg_pos = 0.0
         for height, letter in letters_and_heights:
-            add_letter_to_axis(ax, letter, 0.5+x_pos, y_pos, height)
-            y_pos += height
+            if height > 0:
+                add_letter_to_axis(ax, letter, 0.5+x_pos, y_pos_pos, height)
+                y_pos_pos += height
+            else:
+                add_letter_to_axis(ax, letter, 0.5+x_pos, y_neg_pos, height)
+                y_neg_pos += height
 
     ax.set_xlabel('pos')
     ax.set_ylabel(ylab)
