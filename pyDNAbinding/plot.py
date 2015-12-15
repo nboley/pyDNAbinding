@@ -191,9 +191,9 @@ def add_letter_to_axis(ax, let, x, y, height):
     """
     for polygon, color in izip(letters_polygons[let], colors[let]):
         new_polygon = affinity.scale(
-            polygon, yfact=height)
+            polygon, yfact=height, origin=(0,0,0))
         new_polygon = affinity.translate(
-            new_polygon, xoff=x, yoff=y + 0.5*(height-1))
+            new_polygon, xoff=x, yoff=y)
         patch = PolygonPatch(
             new_polygon, edgecolor=color, facecolor=color)
         ax.add_patch(patch)
