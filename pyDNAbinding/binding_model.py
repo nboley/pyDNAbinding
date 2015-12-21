@@ -376,8 +376,8 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
 
     def build_pwm(self, chem_pot):
         pwm = np.zeros((4, self.motif_len), dtype=float)
-        mean_energy = ref_energy + chem_pot + self.mean_energy
-        for i, base_energies in enumerate(self.ddg_array):
+        mean_energy = chem_pot + self.mean_energy
+        for i, base_energies in enumerate(self.ddg_array[:,:4]):
             base_mut_energies = mean_energy + base_energies.mean() - base_energies 
             occs = logistic(base_mut_energies)
             pwm[:,i] = occs/occs.sum()
@@ -437,12 +437,17 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         ConvolutionalDNABindingModel.__init__(
             self, convolutional_filter, **kwargs)
 
-def load_binding_model(fname):
+def load_binding_models(fname):
+    models = []
     with open(fname) as fp:
-        data = yaml.load(fp)
-        object_type = globals()[data['model_type']]
-        del data['model_type']
-        return object_type(**data)
+        models_data = yaml.load(fp)
+        if isinstance(models_data, dict):
+            models_data = [models_data,]
+        for model_data in models_data:
+            object_type = globals()[model_data['model_type']]
+            del model_data['model_type']
+            models.append( object_type(**model_data) )
+    return models
 
 class ReducedDeltaDeltaGArray(np.ndarray):
     def calc_base_contributions(self):

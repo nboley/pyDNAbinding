@@ -197,6 +197,8 @@ def add_letter_to_axis(ax, let, x, y, height):
         patch = PolygonPatch(
             new_polygon, edgecolor=color, facecolor=color)
         ax.add_patch(patch)
+        break
+    
     return
 
 def plot_bases(letter_heights, ylab='bits'):
@@ -212,7 +214,7 @@ def plot_bases(letter_heights, ylab='bits'):
     fig = pyplot.figure()
 
     x_range = [1, letter_heights.shape[0]]
-    y_range = [0, int(ceil(letter_heights.sum(1).max()))]
+    y_range = [0, ceil(2*letter_heights.sum(1).max())/2]
 
     ax = fig.add_subplot(111)
     for x_pos, heights in enumerate(letter_heights):
@@ -229,14 +231,16 @@ def plot_bases(letter_heights, ylab='bits'):
     ax.set_xticks(range(*x_range) + [x_range[-1]])
 
     ax.set_ylim(*y_range)
-    ax.set_yticks(range(*y_range) + [y_range[-1]])
+    print np.linspace(y_range[0], y_range[1], 0.5)
+    ax.set_yticks(np.linspace(y_range[0], y_range[1], 5))
 
-    ax.set_aspect(1)
+    ax.set_aspect(4.0/y_range[-1])
 
 def example():
     pwm = np.array([[0,0,0.01,1], [2,5.2,1,1]])
     plot_bases(pwm)
-    pyplot.show()
+    pyplot.savefig('test.png')
+    #pyplot.show()
 
 if __name__ == '__main__':
     example()
