@@ -6,9 +6,9 @@ from collections import defaultdict, namedtuple
 
 import numpy as np
 
-SHAPE_PARAM_TYPE = 'float32'
+from sequence import reverse_complement
 
-RC_map = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
+SHAPE_PARAM_TYPE = 'float32'
 
 def iter_fivemers(seq):
     for start in xrange(len(seq) - 5 + 1):
@@ -67,15 +67,15 @@ def est_shape_params_for_subseq(subseq):
     a vector of length len(subseq) - 2 (because the encoding is done with 
     fivemers)
     """
-    res = np.zeros((6, len(subseq)-4), dtype=SHAPE_PARAM_TYPE)
+    res = np.zeros((len(subseq)-4, 6), dtype=SHAPE_PARAM_TYPE)
     for i, fivemer in enumerate(iter_fivemers(subseq)):
         fivemer = fivemer.upper()
         if 'AAAAA' == fivemer:
-            res[:,i] = 0
+            res[i,:] = 0
         elif 'N' in fivemer:
-            res[:,i] = 0
+            res[i,:] = 0
         else:
-            res[:,i] = shape_data[fivemer_to_index(fivemer)]
+            res[i,:] = shape_data[fivemer_to_index(fivemer)]
     return res
 
 def code_sequence_shape(seq, left_flank_dimer="NN", right_flank_dimer="NN"):
@@ -84,13 +84,13 @@ def code_sequence_shape(seq, left_flank_dimer="NN", right_flank_dimer="NN"):
 
 def code_seqs_shape_features(seqs, seq_len, n_seqs):
     shape_features = np.zeros(
-        (n_seqs, 6, seq_len), dtype=SHAPE_PARAM_TYPE)
+        (n_seqs, seq_len, 6), dtype=SHAPE_PARAM_TYPE)
     RC_shape_features = np.zeros(
-        (n_seqs, 6, seq_len), dtype=SHAPE_PARAM_TYPE)
+        (n_seqs, seq_len, 6), dtype=SHAPE_PARAM_TYPE)
     
     for i, seq in enumerate(seqs):
         shape_features[i, :, :] = code_sequence_shape(seq)
         RC_shape_features[i, :, :] = code_sequence_shape(
-            "".join(RC_map[base] for base in seq[::-1]))
+            reverse_complement(seq))
 
     return shape_features, RC_shape_features

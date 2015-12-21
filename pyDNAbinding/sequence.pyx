@@ -122,11 +122,11 @@ def one_hot_encode_sequences(sequences):
     finally:
         free(c_sequences)
 
-class OneHotCodedDNASeq(np.ndarray):
+class CodedDNASeq(np.ndarray):
     pass
 
 def one_hot_encode_sequence(sequence):
-    return one_hot_encode_sequences((sequence,))[0,].view(OneHotCodedDNASeq)
+    return one_hot_encode_sequences((sequence,))[0,].view(CodedDNASeq)
 
 def profile( seq_len, n_seq, n_test_iterations ):
     """Test the speed of the one-hot-encoding implementation.
@@ -144,6 +144,10 @@ def profile( seq_len, n_seq, n_test_iterations ):
     return 
 
 ################################################################################
+
+RC_map = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
+def reverse_complement(seq):
+    return "".join(RC_map[base] for base in seq[::-1])
 
 import random
 def sample_random_seqs(n_sims, seq_len):

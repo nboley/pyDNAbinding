@@ -10,7 +10,11 @@ import yaml
 from scipy.optimize import brentq
 
 from sequence import (
-    one_hot_encode_sequence, one_hot_encode_sequences, OneHotCodedDNASeq )
+    one_hot_encode_sequence, one_hot_encode_sequences,
+    CodedDNASeq,
+    reverse_complement)
+
+from shape import code_seqs_shape_features
 
 from misc import logistic, R, T, calc_occ
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
@@ -58,20 +62,41 @@ class DNASequence(object):
     """
     def __len__(self):
         return len(self.seq)
-    
-    def __init__(self, seq, one_hot_coded_seq=None):
+
+    @property
+    def one_hot_coded_seq(self):
+        return self.coded_seq[:,:4]
+    @property
+    def fwd_shape_features(self):
+        return self.coded_seq[:,4:10]
+    @property
+    def RC_shape_features(self):
+        return self.coded_seq[:,10:16]
+
+    def __init__(self, seq, coded_seq=None):
         self.seq = seq
 
-        if one_hot_coded_seq is None:
-            one_hot_coded_seq = one_hot_encode_sequence(seq)
-        self.one_hot_coded_seq = one_hot_coded_seq
-
+        if coded_seq is None:
+            coded_seq = one_hot_encode_sequence(seq)
+        self.coded_seq = coded_seq
+             
     def __str__(self):
         return str(self.seq)
     
     def __repr__(self):
         return repr(self.seq)
 
+    def subsequence(self, start, end):
+        assert end > start and start >= 0 and end <= len(self)
+        return DNASequence(self.seq[start:end+1], self.coded_seq[start:end+1,:])
+
+    def reverse_complement(self):
+        new_coded_seq = np.zeros_like(self.coded_seq)
+        new_coded_seq[:,:4] = np.flipud(np.fliplr(self.one_hot_coded_seq))
+        new_coded_seq[:,4:10] = self.RC_shape_features
+        new_coded_seq[:,10:16] = self.fwd_shape_features
+        return DNASequence(reverse_complement(self.seq), new_coded_seq)
+    
 class DNASequences(object):
     """Container for DNASequence objects.
 
@@ -85,7 +110,23 @@ class DNASequences(object):
     def iter_one_hot_coded_seqs(self):
         for seq in self:
             yield seq.one_hot_coded_seq
-    
+
+    def iter_best_subseq(self, mo):
+        fwd_scores = self.score_binding_sites(mo, 'FWD')
+        rc_scores = self.score_binding_sites(mo, 'RC')
+        fwd_best_binding_sites = np.argmax(fwd_scores, 1)
+        rc_best_binding_sites = np.argmax(rc_scores, 1)
+        for i, seq in enumerate(self):
+            fwd_pos = fwd_best_binding_sites[i]
+            fwd_score = fwd_scores[i, fwd_pos]
+            rc_pos = rc_best_binding_sites[i]
+            rc_score = rc_scores[i, rc_pos]
+            if fwd_score > rc_score:
+                yield seq.subsequence(fwd_pos, fwd_pos+mo.motif_len-1)
+            else:
+                yield seq.subsequence(
+                    fwd_pos, fwd_pos+mo.motif_len-1).reverse_complement()
+            
     def __len__(self):
         return len(self._seqs)
     
@@ -118,12 +159,12 @@ class FixedLengthDNASequences(DNASequences):
     max_fft_seq_len = 500000
     
     def __iter__(self):
-        for seq, coded_seq in izip(self._seqs, self.one_hot_coded_seqs):
-            yield DNASequence(seq, coded_seq.view(OneHotCodedDNASeq))
+        for seq, coded_seq in izip(self._seqs, self.coded_seqs):
+            yield DNASequence(seq, coded_seq.view(CodedDNASeq))
         return
 
     def iter_one_hot_coded_seqs(self):
-        return (x.view(OneHotCodedDNASeq) for x in self.one_hot_coded_seqs)
+        return (x.view(CodedDNASeq) for x in self.one_hot_coded_seqs)
 
     def _naive_score_binding_sites(self, model, direction):
         """Score binding sites by looping over all sequences.
@@ -199,7 +240,7 @@ class FixedLengthDNASequences(DNASequences):
         )
         return rfftn(self.one_hot_coded_seqs, fshape)
 
-    def __init__(self, seqs):
+    def __init__(self, seqs, include_shape=False):
         self._seqs = list(seqs)
 
         self._seq_lens = np.array([len(seq) for seq in self._seqs])
@@ -209,6 +250,18 @@ class FixedLengthDNASequences(DNASequences):
         self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
         self.freq_one_hot_coded_seqs = self._init_freq_one_hot_coded_seqs()
 
+        self.shape_features = None
+        if include_shape:
+            self.shape_features = code_seqs_shape_features(
+                self._seqs, self.seq_len, len(self._seqs))
+
+        self.coded_seqs = np.dstack((
+            self.one_hot_coded_seqs,
+            self.shape_features[0],
+            self.shape_features[1]))
+
+        print self.coded_seqs.shape
+        
 class DNABindingModels(object):
     """Container for DNABindingModel objects
 
@@ -314,8 +367,8 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         if isinstance(seq, str):
             coded_seq = one_hot_encode_sequence(seq)
         elif isinstance(seq, DNASequence):
-            coded_seq = seq.one_hot_coded_seq
-        elif isinstance(seq, OneHotCodedDNASeq):
+            coded_seq = seq.coded_seq
+        elif isinstance(seq, CodedDNASeq):
             coded_seq = seq
         else:
             assert False, "Unrecognized sequence type '%s'" % str(type(seq))
