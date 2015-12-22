@@ -519,6 +519,13 @@ def load_binding_models(fname):
             models.append( object_type(**model_data) )
     return models
 
+def load_binding_model(fname):
+    mos = load_binding_models(fname)
+    if len(mos) > 1:
+        raise ValueError, "Binding models file '%s' contains more than one model" % fname
+    else:
+        return mos[0]
+
 class ReducedDeltaDeltaGArray(np.ndarray):
     def calc_base_contributions(self):
         base_contribs = np.zeros((self.motif_len, 4))

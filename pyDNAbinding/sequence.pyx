@@ -128,23 +128,6 @@ class CodedDNASeq(np.ndarray):
 def one_hot_encode_sequence(sequence):
     return one_hot_encode_sequences((sequence,))[0,].view(CodedDNASeq)
 
-
-def code_seqs(seqs, include_shape):
-    # materialize for now, until we fix the following to work with generator
-    seqs = list(seqs)
-
-    one_hot_coded_seqs = one_hot_encode_sequences(seqs)
-    n_seqs = one_hot_coded_seqs.shape[0]
-    seq_length = one_hot_coded_seqs.shape[2]
-    if not include_shape:
-        shape_coded_fwd_seqs, shape_coded_RC_seqs = None, None
-    else:
-        ( shape_coded_fwd_seqs, shape_coded_RC_seqs 
-            ) = code_seqs_shape_features(seqs, seq_length, n_seqs)
-    return CodedSeqs(
-        one_hot_coded_seqs, shape_coded_fwd_seqs, shape_coded_RC_seqs)
-
-
 def profile( seq_len, n_seq, n_test_iterations ):
     """Test the speed of the one-hot-encoding implementation.
 
