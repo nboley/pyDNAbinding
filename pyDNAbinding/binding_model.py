@@ -542,7 +542,7 @@ class DeltaDeltaGArray(np.ndarray):
         return self.shape[0]
 
     def consensus_seq(self):
-        return "".join( 'ACGT'[x] for x in np.argmin(self, axis=1) )
+        return "".join( 'ACGT'[x] for x in np.argmin(self.base_portion, axis=1))
 
     def summary_str(self, ref_energy):
         rv = []
@@ -571,7 +571,7 @@ def est_chem_potential_from_affinities(
     [TF] - [TF]_0 - \sum{all seq}{ [s_i]_0[TF](1/{[TF]+exp(delta_g)}) = 0  
     exp{u} - [TF]_0 - \sum{i}{ 1/(1+exp(G_i)exp(-)
     """    
-    if weights == None:
+    if weights is None:
         weights = np.ones(affinities.shape, dtype=float)/len(affinities)
     assert weights.sum().round(6) == 1.0
 
