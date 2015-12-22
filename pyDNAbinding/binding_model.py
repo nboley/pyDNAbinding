@@ -22,8 +22,10 @@ from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
 
 base_map = dict(zip('ACGT', range(4)))
 def calc_pwm_from_simulations(mo, chem_affinity, n_sims=10000):
+    include_shape = True if mo.encoding_type == 'ONE_HOT_PLUS_SHAPE' else False
     # we add 4 bases to the motif length to account for the shape features 
-    seqs = FixedLengthDNASequences(sample_random_seqs(n_sims, 4+mo.motif_len))
+    seqs = FixedLengthDNASequences(
+        sample_random_seqs(n_sims, 4+mo.motif_len), include_shape=include_shape)
     affinities = -seqs.score_binding_sites(mo, 'FWD')[:,2]
     occs = calc_occ(chem_affinity, affinities)
     # normalize to the lowest occupancy sequence 
@@ -85,7 +87,7 @@ class DNASequence(object):
     def one_hot_coded_seq(self):
         return self.coded_seq[:,:4]
     @property
-    def fwd_shape_features(self):
+    def shape_features(self):
         return self.coded_seq[:,4:10]
     @property
     def RC_shape_features(self):
@@ -112,7 +114,6 @@ class DNASequence(object):
         new_coded_seq = np.zeros_like(self.coded_seq)
         new_coded_seq[:,:4] = np.flipud(np.fliplr(self.one_hot_coded_seq))
         new_coded_seq[:,4:10] = self.RC_shape_features
-        new_coded_seq[:,10:16] = self.fwd_shape_features
         return DNASequence(reverse_complement(self.seq), new_coded_seq)
     
 class DNASequences(object):
@@ -271,15 +272,14 @@ class FixedLengthDNASequences(DNASequences):
         self.shape_features = None
         if include_shape:
             self.shape_features = code_seqs_shape_features(
-                self._seqs, self.seq_len, len(self._seqs))
+                self._seqs, self.seq_len, len(self._seqs))[0]
 
         if self.shape_features is None:
             self.coded_seqs = self.one_hot_coded_seqs
         else:
             self.coded_seqs = np.dstack((
                 self.one_hot_coded_seqs,
-                self.shape_features[0],
-                self.shape_features[1]))
+                self.shape_features))
         
 class DNABindingModels(object):
     """Container for DNABindingModel objects
@@ -399,8 +399,8 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 
         """
         rv = []
-        for one_hot_coded_seq in seqs.iter_one_hot_coded_seqs():
-            rv.append(self.score_binding_sites(one_hot_coded_seq, direction))
+        for seq in seqs:
+            rv.append(self.score_binding_sites(seq, direction))
         return rv
 
 class PWMBindingModel(ConvolutionalDNABindingModel):
