@@ -12,12 +12,30 @@ from scipy.optimize import brentq
 from sequence import (
     one_hot_encode_sequence, one_hot_encode_sequences,
     CodedDNASeq,
-    reverse_complement)
+    reverse_complement,
+    sample_random_seqs)
 
 from shape import code_seqs_shape_features
 
 from misc import logistic, R, T, calc_occ
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
+
+base_map = dict(zip('ACGT', range(4)))
+def calc_pwm_from_simulations(mo, chem_affinity, n_sims=10000):
+    # we add 4 bases to the motif length to account for the shape features 
+    seqs = FixedLengthDNASequences(sample_random_seqs(n_sims, 4+mo.motif_len))
+    affinities = -seqs.score_binding_sites(mo, 'FWD')[:,2]
+    occs = calc_occ(chem_affinity, affinities)
+    # normalize to the lowest occupancy sequence 
+    occs /= occs.min()
+    # give a pseudo count of one to avoid divide by zeros
+    cnts = np.ones((4, mo.motif_len), dtype=float)
+    for seq, occ in izip(seqs, occs):
+        for i, base in enumerate(seq.seq[2:-2]):
+            cnts[base_map[base], i] += occ
+    # normalize the base columns to sum to 1
+    return cnts/cnts.sum(0)
+
 
 class ScoreDirection():
     __slots__ = ['FWD', 'RC', 'MAX']
@@ -255,12 +273,13 @@ class FixedLengthDNASequences(DNASequences):
             self.shape_features = code_seqs_shape_features(
                 self._seqs, self.seq_len, len(self._seqs))
 
-        self.coded_seqs = np.dstack((
-            self.one_hot_coded_seqs,
-            self.shape_features[0],
-            self.shape_features[1]))
-
-        print self.coded_seqs.shape
+        if self.shape_features is None:
+            self.coded_seqs = self.one_hot_coded_seqs
+        else:
+            self.coded_seqs = np.dstack((
+                self.one_hot_coded_seqs,
+                self.shape_features[0],
+                self.shape_features[1]))
         
 class DNABindingModels(object):
     """Container for DNABindingModel objects
@@ -428,13 +447,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         return self.ref_energy + self.ddg_array.sum()/4
 
     def build_pwm(self, chem_pot):
-        pwm = np.zeros((4, self.motif_len), dtype=float)
-        mean_energy = chem_pot + self.mean_energy
-        for i, base_energies in enumerate(self.ddg_array[:,:4]):
-            base_mut_energies = mean_energy + base_energies.mean() - base_energies 
-            occs = logistic(base_mut_energies)
-            pwm[:,i] = occs/occs.sum()
-        return pwm
+        return calc_pwm_from_simulations(self, chem_pot)
 
     def _build_repr_dict(self):
         # first write the meta data
