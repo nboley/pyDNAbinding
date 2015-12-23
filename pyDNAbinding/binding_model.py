@@ -90,7 +90,12 @@ class DNASequence(object):
     def shape_features(self):
         return self.coded_seq[:,4:10]
     @property
-    def RC_shape_features(self):
+    def shape_features(self):
+        """Alias for shape features.
+        """
+        return self.shape_features
+    @property
+    def rc_shape_features(self):
         return self.coded_seq[:,10:16]
 
     def __init__(self, seq, coded_seq=None):
@@ -113,7 +118,8 @@ class DNASequence(object):
     def reverse_complement(self):
         new_coded_seq = np.zeros_like(self.coded_seq)
         new_coded_seq[:,:4] = np.flipud(np.fliplr(self.one_hot_coded_seq))
-        new_coded_seq[:,4:10] = self.RC_shape_features
+        new_coded_seq[:,4:10] = self.rc_shape_features
+        new_coded_seq[:,10:16] = self.shape_features
         return DNASequence(reverse_complement(self.seq), new_coded_seq)
     
 class DNASequences(object):
@@ -244,22 +250,8 @@ class FixedLengthDNASequences(DNASequences):
                 # take the in-place maximum
                 return np.maximum(fwd_scores, rc_scores, fwd_scores) 
     
-    def _init_freq_one_hot_coded_seqs(self):
-        """Perform a fft on the array of coded sequences.
-
-        Currently disabled because the optimization isnt being used. 
-        """
-        return None
-        if self.seq_len > self.max_fft_seq_len:
-            return None
-        fshape = ( 
-            next_good_fshape(len(self)), 
-            next_good_fshape(self.seq_len+self.max_bs_len-1), 
-            self.one_hot_coded_seqs.shape[2] 
-        )
-        return rfftn(self.one_hot_coded_seqs, fshape)
-
     def __init__(self, seqs, include_shape=False):
+        self.have_shape_features = include_shape
         self._seqs = list(seqs)
 
         self._seq_lens = np.array([len(seq) for seq in self._seqs])
@@ -267,19 +259,22 @@ class FixedLengthDNASequences(DNASequences):
         self.seq_len = self._seq_lens[0]
 
         self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
-        self.freq_one_hot_coded_seqs = self._init_freq_one_hot_coded_seqs()
+        self.freq_one_hot_coded_seqs = None
 
-        self.shape_features = None
+        self.fwd_shape_features = None
+        self.rc_shape_features = None
         if include_shape:
-            self.shape_features = code_seqs_shape_features(
-                self._seqs, self.seq_len, len(self._seqs))[0]
-
+            (self.fwd_shape_features, self.rc_shape_features 
+             ) = code_seqs_shape_features(
+                 self._seqs, self.seq_len, len(self._seqs))
+        self.shape_features = self.fwd_shape_features
+        
         if self.shape_features is None:
             self.coded_seqs = self.one_hot_coded_seqs
         else:
             self.coded_seqs = np.dstack((
                 self.one_hot_coded_seqs,
-                self.shape_features))
+                self.fwd_shape_features))
         
 class DNABindingModels(object):
     """Container for DNABindingModel objects
