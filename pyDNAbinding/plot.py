@@ -246,6 +246,8 @@ def plot_bases(letter_heights, ylab='bits'):
 
     ax.set_aspect(aspect='auto', adjustable='box')
 
+    return fig
+
 def example():
     pwm = np.array([[0,0,0.01,1], [2,5.2,1,1]])
     plot_bases(pwm)
