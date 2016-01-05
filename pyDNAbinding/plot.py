@@ -244,7 +244,7 @@ def plot_bases(letter_heights, ylab='bits'):
     ax.set_ylim(*y_range)
     ax.set_yticks(range(*y_range) + [y_range[-1]])
 
-    ax.set_aspect(1)
+    ax.set_aspect(aspect='auto', adjustable='box')
 
 def example():
     pwm = np.array([[0,0,0.01,1], [2,5.2,1,1]])
