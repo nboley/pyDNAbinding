@@ -40,41 +40,23 @@ def calc_pwm_from_simulations(mo, chem_affinity, n_sims=10000):
 
 
 class ScoreDirection():
-    __slots__ = ['FWD', 'RC', 'MAX']
     FWD = 'FWD'
     RC = 'RC'
     MAX = 'MAX'
+    BOTH = 'BOTH'
 
-def score_coded_seq_with_convolutional_filter(
-        coded_seq, filt, direction):
+def score_coded_seq_with_convolutional_filter(coded_seq, filt):
     """Score coded sequence using the convolutional filter filt. 
     
     input:
     coded_seq: hot-one encoded DNA sequence (Nx4) where N is the number
                of bases in the sequence.
     filt     : the convolutional filter (e.g. pwm) to score the model with.
-    direction: The direction to score the sequence in. 
-               FWD: score the forward sequence
-                RC: score using the reverse complement of the filter
-               MAX: score in both diretions, and then return the maximum score 
-                    between the two directions
+
     returns  : Nx(BS_len-seq_len+1) numpy array with binding sites scores
     """
-    assert direction in ScoreDirection.__slots__
-    if direction == ScoreDirection.FWD: 
-        return multichannel_convolve(
-            np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
-    elif direction == ScoreDirection.RC: 
-        return multichannel_convolve(
-            coded_seq, filt, mode='valid')
-    elif direction == ScoreDirection.MAX:
-        fwd_scores = multichannel_convolve(
-            np.fliplr(np.flipud(coded_seq)), filt, mode='valid')
-        rc_scores = multichannel_convolve(
-            coded_seq, filt, mode='valid')
-        # take the in-place maximum
-        return np.maximum(fwd_scores, rc_scores, fwd_scores) 
-    assert False, 'Should be unreachable'
+    return multichannel_convolve(
+            np.fliplr(np.flipud(coded_seq)), filt, mode='valid')[::-1]
 
 class DNASequence(object):
     """Store DNA sequence. 
@@ -84,27 +66,27 @@ class DNASequence(object):
         return len(self.seq)
 
     @property
+    def coded_seq(self):
+        return self.fwd_coded_seq
+
+    @property
     def one_hot_coded_seq(self):
-        return self.coded_seq[:,:4]
+        return self.fwd_coded_seq[:,:4]
     @property
     def shape_features(self):
-        return self.coded_seq[:,4:10]
-    @property
-    def shape_features(self):
-        """Alias for shape features.
-        """
-        return self.shape_features
-    @property
-    def rc_shape_features(self):
-        return self.coded_seq[:,10:16]
+        return self.fwd_coded_seq[:,4:10]
 
-    def __init__(self, seq, coded_seq=None):
+    def __init__(self, seq, fwd_coded_seq=None, rc_coded_seq=None):
         self.seq = seq
+        
+        if fwd_coded_seq is None:
+            fwd_coded_seq = one_hot_encode_sequence(seq)
+        if rc_coded_seq is None:
+            self.rc_coded_seq = one_hot_encode_sequence(reverse_complement(seq))
 
-        if coded_seq is None:
-            coded_seq = one_hot_encode_sequence(seq)
-        self.coded_seq = coded_seq
-             
+        self.fwd_coded_seq = fwd_coded_seq
+        self.rc_coded_seq = rc_coded_seq
+
     def __str__(self):
         return str(self.seq)
     
@@ -116,11 +98,49 @@ class DNASequence(object):
         return DNASequence(self.seq[start:end+1], self.coded_seq[start:end+1,:])
 
     def reverse_complement(self):
-        new_coded_seq = np.zeros_like(self.coded_seq)
-        new_coded_seq[:,:4] = np.flipud(np.fliplr(self.one_hot_coded_seq))
-        new_coded_seq[:,4:10] = self.rc_shape_features
-        new_coded_seq[:,10:16] = self.shape_features
-        return DNASequence(reverse_complement(self.seq), new_coded_seq)
+        return DNASequence(
+            reverse_complement(self.seq), self.rc_coded_seq, self.fwd_coded_seq)
+
+    def score_binding_sites(self, model, direction):
+        """
+
+        direction: The direction to score the sequence in. 
+              FWD: score the forward sequence
+               RC: score using the reverse complement of the filter
+        """
+        if direction == ScoreDirection.FWD:
+            return model.score_binding_sites(self)
+        elif direction == ScoreDirection.RC:
+            return model.score_binding_sites(self.reverse_complement())
+        elif direction in (ScoreDirection.MAX, ScoreDirection.BOTH):
+            fwd_scores = model.score_binding_sites(self)
+            rc_scores = model.score_binding_sites(self.reverse_complement())
+            scores = np.dstack((fwd_scores, rc_scores))
+            if direction == ScoreDirection.MAX:
+                scores = np.max(scores, axis=2)
+            return scores
+        else:
+            assert False, "Unrecognized direction '%s'" % direction
+
+    def find_highest_scoring_subseq(self, mo, direction=ScoreDirection.BOTH):
+        """Find the highest scoring subsequence. 
+
+        Examine all subsequences of length mo.motif_len, and return score and subsequence.  
+        """
+        if direction not in (ScoreDirection.BOTH, ScoreDirection.MAX):
+            raise NotImplementedError, "find_highest_scoring_subseq is not implemented for just fwd seq or reverse complement (and it's not clear that that makes sense)" 
+        scores = self.score_binding_sites(mo, 'BOTH')
+        best_binding_sites = np.unravel_index(np.argmax(scores), scores.shape)
+        best_score = scores[best_binding_sites]
+        best_site_on_RC = (
+            direction == ScoreDirection.RC 
+            or best_binding_sites[2] == 1 )
+        if best_site_on_RC: 
+            return best_score, self.reverse_complement().subsequence(
+                best_binding_sites[1], best_binding_sites[1]+mo.motif_len)
+        else:
+            return best_score, self.subsequence(
+                best_binding_sites[1], best_binding_sites[1]+mo.motif_len)
     
 class DNASequences(object):
     """Container for DNASequence objects.
@@ -136,22 +156,6 @@ class DNASequences(object):
         for seq in self:
             yield seq.one_hot_coded_seq
 
-    def iter_best_subseq(self, mo):
-        fwd_scores = self.score_binding_sites(mo, 'FWD')
-        rc_scores = self.score_binding_sites(mo, 'RC')
-        fwd_best_binding_sites = np.argmax(fwd_scores, 1)
-        rc_best_binding_sites = np.argmax(rc_scores, 1)
-        for i, seq in enumerate(self):
-            fwd_pos = fwd_best_binding_sites[i]
-            fwd_score = fwd_scores[i, fwd_pos]
-            rc_pos = rc_best_binding_sites[i]
-            rc_score = rc_scores[i, rc_pos]
-            if fwd_score > rc_score:
-                yield seq.subsequence(fwd_pos, fwd_pos+mo.motif_len-1)
-            else:
-                yield seq.subsequence(
-                    fwd_pos, fwd_pos+mo.motif_len-1).reverse_complement()
-            
     def __len__(self):
         return len(self._seqs)
     
@@ -160,8 +164,28 @@ class DNASequences(object):
         return self._seq_lens
 
     def score_binding_sites(self, model, direction):
-        return model.score_seqs_binding_sites(self, direction)
-    
+        """
+
+        direction: The direction to score the sequence in. 
+              FWD: score the forward sequence
+               RC: score using the reverse complement of the filter
+        """
+        if direction == ScoreDirection.FWD:
+            return model.score_seqs_binding_sites(self)
+        elif direction == ScoreDirection.RC:
+            return model.score_seqs_binding_sites(
+                x.reverse_complement() for x in self)[::-1]
+        elif direction in (ScoreDirection.MAX, ScoreDirection.BOTH):
+            fwd_scores = model.score_seqs_binding_sites(self)
+            rc_scores = model.score_seqs_binding_sites(
+                x.reverse_complement() for x in self)[::-1]
+            scores = np.dstack((fwd_scores, rc_scores))
+            if direction == ScoreDirection.MAX:
+                scores = np.max(scores, axis=2)
+            return scores
+        else:
+            assert False, "Unrecognized direction '%s'" % direction
+
     def __init__(self, seqs):
         self._seqs = []
         self._seq_lens = []
@@ -377,13 +401,12 @@ class ConvolutionalDNABindingModel(DNABindingModel):
     def convolutional_filter_base_portion(self):
         return self.convolutional_filter[:,:4]
 
-    def score_binding_sites(self, seq, direction):
+    def score_binding_sites(self, seq):
         """Score all binding sites in seq.
         
         """
-        assert direction in ScoreDirection.__slots__
         if isinstance(seq, str):
-            coded_seq = one_hot_encode_sequence(seq)
+            coded_seq = DNASequence(seq).coded_seq
         elif isinstance(seq, DNASequence):
             coded_seq = seq.coded_seq
         elif isinstance(seq, CodedDNASeq):
@@ -391,15 +414,15 @@ class ConvolutionalDNABindingModel(DNABindingModel):
         else:
             assert False, "Unrecognized sequence type '%s'" % str(type(seq))
         return score_coded_seq_with_convolutional_filter(
-            coded_seq, self.convolutional_filter_base_portion, direction=direction)
+            coded_seq, self.convolutional_filter)
 
-    def score_seqs_binding_sites(self, seqs, direction):
+    def score_seqs_binding_sites(self, seqs):
         """Score all binding sites in all sequences.
 
         """
         rv = []
         for seq in seqs:
-            rv.append(self.score_binding_sites(seq, direction))
+            rv.append(self.score_binding_sites(seq))
         return rv
 
 class PWMBindingModel(ConvolutionalDNABindingModel):

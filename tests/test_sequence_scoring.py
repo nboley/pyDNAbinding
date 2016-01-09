@@ -22,57 +22,72 @@ def score_selex_model(seq_len=100000):
     models = load_selex_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq, 'MAX')
+    score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
 def score_pwm(seq_len=100000):
     models = load_pwms_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq, 'MAX')
+    score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
 def score_model(seq_len=100000):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seq = 'A'*seq_len
-    score = model.score_binding_sites(seq, 'MAX')
+    score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
 def score_multiple_seqs(seq_len=100000, n_seqs=10):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seqs = DNASequences(['A'*seq_len]*n_seqs)
-    scores = model.score_seqs_binding_sites(seqs, 'MAX')
+    scores = seqs.score_binding_sites(model, 'FWD')
     print 'PASS', model.motif_len, len(scores)
 
 def score_multiple_fixed_len_seqs(seq_len=10000, n_seqs=100):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
     seqs = FixedLengthDNASequences(['A'*seq_len]*n_seqs)
-    scores = model.score_seqs_binding_sites(seqs, 'MAX')
+    scores = model.score_seqs_binding_sites(seqs)
     print 'PASS', model.motif_len, len(seqs), len(scores)
 
 def score_seqs():
     def score(seq, motif, direction):
-        return score_coded_seq_with_convolutional_filter(
-            DNASequence(seq).one_hot_coded_seq, motif, direction )
+        return DNASequence(seq).score_binding_sites(motif, direction)
     seq = 'A'*10
-    motif = np.array([[1, 0, 0, 0],[1, 0, 0, 0]], dtype=float)
+    motif = ConvolutionalDNABindingModel(
+        np.array([[1, 0, 0, 0],[1, 0, 0, 0]], dtype=float))
     assert (2 == score(seq, motif, 'FWD').round(6)).all()
     assert (0 == score(seq, motif, 'RC').round(6)).all()
     assert (2 == score(seq, motif, 'MAX').round(6)).all()
     
     seq = 'TACT'
-    motif = np.array([[0, 0, 0, 1],[1, 0, 0, 0],[0, 1, 0, 0],[0, 0, 0, 1]], 
-                     dtype=float)
+    motif = ConvolutionalDNABindingModel(
+        np.array([[0, 0, 0, 1],[1, 0, 0, 0],[0, 1, 0, 0],[0, 0, 0, 1]], 
+                 dtype=float)
+    )
     assert score(seq, motif, 'FWD').round(6) == [4,]
-    motif = np.array([[1, 0, 0, 0],[0, 0, 0, 1],[0, 0, 1, 0],[1, 0, 0, 0]], 
-                     dtype=float)
+    motif = ConvolutionalDNABindingModel(
+        np.array([[1, 0, 0, 0],[0, 0, 0, 1],[0, 0, 1, 0],[1, 0, 0, 0]], 
+                 dtype=float)
+    )
     assert score(seq, motif, 'FWD').round(6) == [0,]
-    motif = np.array([[1, 0, 0, 0],[0, 0, 1, 0],[0, 0, 0, 1],[1, 0, 0, 0]], 
-                     dtype=float)
+    motif = ConvolutionalDNABindingModel(
+        np.array([[1, 0, 0, 0],[0, 0, 1, 0],[0, 0, 0, 1],[1, 0, 0, 0]], 
+                 dtype=float)
+    )
     assert score(seq, motif, 'RC').round(6) == [4,]
+    print 'PASS'
+
+def test_find_best_subseq():
+    motif = ConvolutionalDNABindingModel(
+        np.array([[1,0,0,0],[1,0,0,0],[1,0,0,0],[1,0,0,0]], dtype=float))
+    seq = DNASequence('TAAATCGGTATAAAA')
+    score, seq = seq.find_highest_scoring_subseq(motif)
+    assert abs(score - 4.0) < 1e-6
+    assert seq.seq == 'AAAA'
     print 'PASS'
 
 def test_my_fft_convolve():
@@ -137,10 +152,10 @@ def profile_multi_convolve(seq_len, n_seqs):
         hs.append(ConvolutionalDNABindingModel(np.array([[0, 0, 0, 1],])))
     
     print "Naive", timeit.timeit(
-        lambda: [seqs._naive_score_binding_sites(h, 'MAX') for h in hs], 
+        lambda: [seqs._naive_score_binding_sites(h, 'BOTH') for h in hs], 
         number=1)
     print "Merged", timeit.timeit(
-        lambda: [seqs.score_binding_sites(h, 'MAX') for h in hs], 
+        lambda: [seqs.score_binding_sites(h, 'BOTH') for h in hs], 
         number=1)
     ### Disabled until the multi-threading issue is fixed
     #print "Optimized", timeit.timeit(
@@ -148,14 +163,22 @@ def profile_multi_convolve(seq_len, n_seqs):
     #              seqs._clever_score_binding_sites(h, False)) for h in hs], 
     #    number=1)
 
-"""
-test_my_fft_convolve()
-score_seqs()
-score_selex_model()
-score_pwm()
-score_model()
-score_multiple_seqs()
-score_multiple_fixed_len_seqs()
-profile_convolve_speeds()
-profile_multi_convolve(1000, 100)
-"""
+def main():
+    test_find_best_subseq()
+    #return
+    test_my_fft_convolve()
+    score_seqs()
+    score_selex_model()
+    score_pwm()
+    score_model()
+    score_multiple_seqs()
+    score_multiple_fixed_len_seqs()
+    ## Test the custom convolve function. This takes a while so we disable it
+    ## by default.
+    #profile_convolve_speeds()
+    ## this tests the multi convolve speed optimization, which is disabled
+    ## because of threading problems. Disable for now. 
+    #profile_multi_convolve(10000000, 1)
+
+if __name__ == '__main__':
+    main()
