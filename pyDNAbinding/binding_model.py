@@ -216,12 +216,13 @@ class FixedLengthDNASequences(DNASequences):
     max_fft_seq_len = 500000
     
     def __iter__(self):
-        for seq, coded_seq in izip(self._seqs, self.coded_seqs):
+        for seq, coded_seq in izip(self._seqs, self.fwd_coded_seqs):
             yield DNASequence(seq, coded_seq.view(CodedDNASeq))
         return
 
-    def iter_one_hot_coded_seqs(self):
-        return (x.view(CodedDNASeq) for x in self.one_hot_coded_seqs)
+    @property
+    def one_hot_coded_seqs(self):
+        return self.fwd_one_hot_coded_seqs
 
     def _naive_score_binding_sites(self, model, direction):
         """Score binding sites by looping over all sequences.
@@ -263,50 +264,27 @@ class FixedLengthDNASequences(DNASequences):
 
         returns: numpy array of binding site scores, shape (num_seqs, seq_len-bs_len)
         """
-        if (self.freq_one_hot_coded_seqs is None
-            or model.motif_len > self.max_bs_len 
-            or self.seq_len > self.max_fft_seq_len):
-            return self._naive_score_binding_sites(model, direction)
-        else:
-            if direction == ScoreDirection.FWD:
-                return self._clever_score_binding_sites(
-                    model, reverse_comp=True)
-            elif direction == ScoreDirection.RC:
-                return self._clever_score_binding_sites(
-                    model, reverse_comp=False)
-            elif direction == ScoreDirection.MAX:
-                fwd_scores = self._clever_score_binding_sites(
-                    model, reverse_comp=True)
-                rc_scores = self._clever_score_binding_sites(
-                    model, reverse_comp=False)
-                # take the in-place maximum
-                return np.maximum(fwd_scores, rc_scores, fwd_scores) 
+        return self._naive_score_binding_sites(model, direction)
     
-    def __init__(self, seqs, include_shape=False):
-        self.have_shape_features = include_shape
+    def __init__(self, seqs):
         self._seqs = list(seqs)
 
         self._seq_lens = np.array([len(seq) for seq in self._seqs])
         assert self._seq_lens.max() == self._seq_lens.min()
         self.seq_len = self._seq_lens[0]
 
-        self.one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
-        self.freq_one_hot_coded_seqs = None
+        self.fwd_one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
+        self.rc_one_hot_coded_seqs = np.fliplr(np.flipud(
+            self.fwd_one_hot_coded_seqs))
 
-        self.fwd_shape_features = None
-        self.rc_shape_features = None
-        if include_shape:
-            (self.fwd_shape_features, self.rc_shape_features 
-             ) = code_seqs_shape_features(
-                 self._seqs, self.seq_len, len(self._seqs))
-        self.shape_features = self.fwd_shape_features
-        
-        if self.shape_features is None:
-            self.coded_seqs = self.one_hot_coded_seqs
-        else:
-            self.coded_seqs = np.dstack((
-                self.one_hot_coded_seqs,
-                self.fwd_shape_features))
+        (self.fwd_shape_features, self.rc_shape_features 
+         ) = code_seqs_shape_features(
+             self._seqs, self.seq_len, len(self._seqs))
+
+        self.fwd_coded_seqs = np.dstack(
+            (self.fwd_one_hot_coded_seqs, self.fwd_shape_features))
+        self.rc_coded_seqs = np.dstack(
+            (self.fwd_one_hot_coded_seqs, self.rc_shape_features))
         
 class DNABindingModels(object):
     """Container for DNABindingModel objects
