@@ -1,6 +1,7 @@
-import numpy as np
-
+import os
 import random
+
+import numpy as np
 
 import pyDNAbinding
 from pyDNAbinding.signal import (
@@ -11,9 +12,12 @@ from pyDNAbinding.signal import (
 from pyDNAbinding.binding_model import (
     DNASequence, DNASequences, FixedLengthDNASequences, 
     ConvolutionalDNABindingModel,
-    score_coded_seq_with_convolutional_filter )
+    score_coded_seq_with_convolutional_filter,
+    load_binding_model)
 from pyDNAbinding.DB import ( 
-    load_binding_models_from_db, load_selex_models_from_db, load_pwms_from_db)
+    load_binding_models_from_db, 
+    load_selex_models_from_db, 
+    load_pwms_from_db,)
 from pyDNAbinding.sequence import sample_random_seqs
 
 TEST_MODEL_TF_NAME = 'CTCF'
@@ -21,21 +25,21 @@ TEST_MODEL_TF_NAME = 'CTCF'
 def score_selex_model(seq_len=100000):
     models = load_selex_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
-    seq = 'A'*seq_len
+    seq = DNASequence('A'*seq_len)
     score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
 def score_pwm(seq_len=100000):
     models = load_pwms_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
-    seq = 'A'*seq_len
+    seq = DNASequence('A'*seq_len)
     score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
 def score_model(seq_len=100000):
     models = load_binding_models_from_db(TEST_MODEL_TF_NAME)
     model = models[0]
-    seq = 'A'*seq_len
+    seq = DNASequence('A'*seq_len)
     score = model.score_binding_sites(seq)
     print 'PASS', model.motif_len, score.shape
 
@@ -88,6 +92,20 @@ def test_find_best_subseq():
     score, seq = seq.find_highest_scoring_subseq(motif)
     assert abs(score - 4.0) < 1e-6
     assert seq.seq == 'AAAA'
+    print 'PASS'
+
+def test_score_shape():
+    fname = os.path.join(
+        os.path.dirname(__file__), 
+        'shape_binding_model.yaml'
+    )
+    mo = load_binding_model(fname)
+    seq = DNASequence('TAAATCGGTATAAAA')
+    res = mo.score_binding_sites(seq)
+    assert (res - np.array([
+        5.59928303,  7.53179792,  6.37951453,  4.91754265,  
+        5.88770947,  5.68496414, 4.43050933, 6.61774885, 2.53589249
+    ])).sum() < 1e-6
     print 'PASS'
 
 def test_my_fft_convolve():
@@ -164,6 +182,7 @@ def profile_multi_convolve(seq_len, n_seqs):
     #    number=1)
 
 def main():
+    test_score_shape()
     test_find_best_subseq()
     #return
     test_my_fft_convolve()

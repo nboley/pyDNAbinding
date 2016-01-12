@@ -15,7 +15,7 @@ from sequence import (
     reverse_complement,
     sample_random_seqs)
 
-from shape import code_seqs_shape_features
+from shape import code_sequence_shape, code_seqs_shape_features
 
 from misc import logistic, R, T, calc_occ
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
@@ -80,10 +80,15 @@ class DNASequence(object):
         self.seq = seq
         
         if fwd_coded_seq is None:
-            fwd_coded_seq = one_hot_encode_sequence(seq)
+            fwd_one_hot_coded_seq = one_hot_encode_sequence(seq)
+            fwd_coded_shape = code_sequence_shape(seq)
+            fwd_coded_seq = np.hstack((fwd_one_hot_coded_seq, fwd_coded_shape))
         if rc_coded_seq is None:
-            self.rc_coded_seq = one_hot_encode_sequence(reverse_complement(seq))
-
+            rc_seq = reverse_complement(seq)
+            rc_one_hot_coded_seq = one_hot_encode_sequence(rc_seq)
+            rc_coded_shape = code_sequence_shape(rc_seq)
+            rc_coded_seq = np.hstack((rc_one_hot_coded_seq, rc_coded_shape))
+        
         self.fwd_coded_seq = fwd_coded_seq
         self.rc_coded_seq = rc_coded_seq
 
@@ -170,6 +175,9 @@ class DNASequences(object):
               FWD: score the forward sequence
                RC: score using the reverse complement of the filter
         """
+        scores = [x.score_binding_sites(model, direction) for x in self]
+        return np.hstack(scores)
+        """
         if direction == ScoreDirection.FWD:
             return model.score_seqs_binding_sites(self)
         elif direction == ScoreDirection.RC:
@@ -185,7 +193,7 @@ class DNASequences(object):
             return scores
         else:
             assert False, "Unrecognized direction '%s'" % direction
-
+        """
     def __init__(self, seqs):
         self._seqs = []
         self._seq_lens = []
@@ -399,20 +407,21 @@ class ConvolutionalDNABindingModel(DNABindingModel):
 
     @property
     def convolutional_filter_base_portion(self):
-        return self.convolutional_filter[:,:4]
+        return ConvolutionalDNABindingModel(
+            self.convolutional_filter[:,:4], **self.meta_data)
 
     def score_binding_sites(self, seq):
         """Score all binding sites in seq.
         
         """
-        if isinstance(seq, str):
-            coded_seq = DNASequence(seq).coded_seq
-        elif isinstance(seq, DNASequence):
+        assert isinstance(seq, DNASequence)
+        if self.encoding_type == 'ONE_HOT':
+            coded_seq = seq.one_hot_coded_seq
+        elif self.encoding_type == 'ONE_HOT_PLUS_SHAPE':
             coded_seq = seq.coded_seq
-        elif isinstance(seq, CodedDNASeq):
-            coded_seq = seq
         else:
-            assert False, "Unrecognized sequence type '%s'" % str(type(seq))
+            raise ValueError, "Unrecognized encoding type '%s'" % self.encoding_type
+        
         return score_coded_seq_with_convolutional_filter(
             coded_seq, self.convolutional_filter)
 
@@ -520,7 +529,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         # filter, and then multiply by negative 1 (so that higher scores 
         # correspond to higher binding affinity )
         convolutional_filter = self.ddg_array.copy()
-        convolutional_filter[0,:] += ref_energy
+        convolutional_filter[0,:4] += ref_energy
         convolutional_filter *= -1
         ConvolutionalDNABindingModel.__init__(
             self, convolutional_filter, **kwargs)
