@@ -219,9 +219,6 @@ def plot_bases(letter_heights, ylab='bits'):
     neg_heights = np.copy(letter_heights)
     neg_heights[letter_heights > 0] = 0
 
-    y_range = [int(ceil(neg_heights.sum(axis=1).min() - 1)),
-               int(floor(pos_heights.sum(axis=1).max() + 1))]
-
     ax = fig.add_subplot(111)
     for x_pos, heights in enumerate(letter_heights):
         letters_and_heights = sorted(izip(heights, 'ACGT'))
@@ -240,9 +237,6 @@ def plot_bases(letter_heights, ylab='bits'):
 
     ax.set_xlim(x_range[0]-1, x_range[1]+1)
     ax.set_xticks(range(*x_range) + [x_range[-1]])
-
-    ax.set_ylim(*y_range)
-    ax.set_yticks(range(*y_range) + [y_range[-1]])
 
     ax.set_aspect(aspect='auto', adjustable='box')
 
