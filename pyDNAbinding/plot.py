@@ -239,6 +239,7 @@ def plot_bases(letter_heights, ylab='bits'):
     ax.set_xticks(range(*x_range) + [x_range[-1]])
 
     ax.set_aspect(aspect='auto', adjustable='box')
+    ax.autoscale_view()
 
     return fig
 
