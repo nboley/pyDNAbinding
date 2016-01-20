@@ -44,6 +44,7 @@ class ScoreDirection():
     RC = 'RC'
     MAX = 'MAX'
     BOTH = 'BOTH'
+    BOTH_FLAT = 'BOTH_FLAT'
 
 def score_coded_seq_with_convolutional_filter(coded_seq, filt):
     """Score coded sequence using the convolutional filter filt. 
@@ -117,12 +118,17 @@ class DNASequence(object):
             return model.score_binding_sites(self)
         elif direction == ScoreDirection.RC:
             return model.score_binding_sites(self.reverse_complement())
-        elif direction in (ScoreDirection.MAX, ScoreDirection.BOTH):
+        elif direction in (ScoreDirection.MAX, 
+                           ScoreDirection.BOTH, 
+                           ScoreDirection.BOTH_FLAT):
             fwd_scores = model.score_binding_sites(self)
             rc_scores = model.score_binding_sites(self.reverse_complement())
+
             scores = np.dstack((fwd_scores, rc_scores))
             if direction == ScoreDirection.MAX:
                 scores = np.max(scores, axis=2)
+            elif direction == ScoreDirection.BOTH_FLAT:
+                scores = scores.ravel()
             return scores
         else:
             assert False, "Unrecognized direction '%s'" % direction
@@ -227,6 +233,8 @@ class FixedLengthDNASequences(DNASequences):
     def _naive_score_binding_sites(self, model, direction):
         """Score binding sites by looping over all sequences.
         
+        model: binding model to score with
+        direction: FWD, REV, BOTH, BOTH_FLAT, MAX
         """
         return np.array(
             DNASequences.score_binding_sites(self, model, direction))
