@@ -19,20 +19,20 @@ from shape import code_sequence_shape, code_seqs_shape_features
 
 from misc import logistic, R, T, calc_occ
 from signal import multichannel_convolve, rfftn, irfftn, next_good_fshape
+from plot import plot_bases, pyplot
 
 base_map = dict(zip('ACGT', range(4)))
 def calc_pwm_from_simulations(mo, chem_affinity, n_sims=10000):
     include_shape = True if mo.encoding_type == 'ONE_HOT_PLUS_SHAPE' else False
     # we add 4 bases to the motif length to account for the shape features 
-    seqs = FixedLengthDNASequences(
-        sample_random_seqs(n_sims, 4+mo.motif_len), include_shape=include_shape)
+    seqs = FixedLengthDNASequences(sample_random_seqs(n_sims, 4+mo.motif_len))
     affinities = -seqs.score_binding_sites(mo, 'FWD')[:,2]
     occs = calc_occ(chem_affinity, affinities)
     # normalize to the lowest occupancy sequence 
-    occs /= occs.min()
+    occs /= occs.max()
     # give a pseudo count of one to avoid divide by zeros
-    cnts = np.ones((4, mo.motif_len), dtype=float)
-    for seq, occ in izip(seqs, occs):
+    cnts = np.zeros((4, mo.motif_len), dtype=float)
+    for seq, occ, aff in izip(seqs, occs, affinities):
         for i, base in enumerate(seq.seq[2:-2]):
             cnts[base_map[base], i] += occ
     # normalize the base columns to sum to 1
@@ -176,7 +176,7 @@ class DNASequences(object):
                RC: score using the reverse complement of the filter
         """
         scores = [x.score_binding_sites(model, direction) for x in self]
-        return np.hstack(scores)
+        return np.vstack(scores)
         """
         if direction == ScoreDirection.FWD:
             return model.score_seqs_binding_sites(self)
@@ -437,6 +437,12 @@ class PWMBindingModel(ConvolutionalDNABindingModel):
                 energies[i, j] = base_energy
         return EnergeticDNABindingModel(ref_energy, energies, **self.meta_data)
 
+    def plot(self, fname=None):
+        inf = (self.pwm*np.log2(self.pwm/0.25)).sum(1)
+        plot_bases(self.pwm*inf[:,None])
+        if fname is not None:
+            pyplot.savefig(fname)
+
 class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     """A convolutional binding model where the binding site scores are the physical binding affinity.
 
@@ -457,6 +463,9 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
 
     def build_pwm(self, chem_pot):
         return calc_pwm_from_simulations(self, chem_pot)
+
+    def build_pwm_model(self, chem_pot):
+        return PWMBindingModel(self.build_pwm(chem_pot).T, **self.meta_data) 
 
     def _build_repr_dict(self):
         # first write the meta data
@@ -507,7 +516,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         # filter, and then multiply by negative 1 (so that higher scores 
         # correspond to higher binding affinity )
         convolutional_filter = self.ddg_array.copy()
-        convolutional_filter[0,:4] += ref_energy
+        convolutional_filter[0,:4] = ref_energy
         convolutional_filter *= -1
         ConvolutionalDNABindingModel.__init__(
             self, convolutional_filter, **kwargs)

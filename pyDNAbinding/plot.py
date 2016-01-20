@@ -4,6 +4,10 @@ from math import ceil
 
 from itertools import izip
 
+import matplotlib
+# Force matplotlib to not use any Xwindows backend.
+matplotlib.use('Agg')
+
 from matplotlib import pyplot
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
