@@ -282,9 +282,7 @@ class FixedLengthDNASequences(DNASequences):
         self.seq_len = self._seq_lens[0]
 
         self.fwd_one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
-        self.rc_one_hot_coded_seqs = np.fliplr(np.flipud(
-            self.fwd_one_hot_coded_seqs))
-
+        self.rc_one_hot_coded_seqs = self.fwd_one_hot_coded_seqs[:,::-1,::-1]
         (self.fwd_shape_features, self.rc_shape_features 
          ) = code_seqs_shape_features(
              self._seqs, self.seq_len, len(self._seqs))
@@ -292,7 +290,7 @@ class FixedLengthDNASequences(DNASequences):
         self.fwd_coded_seqs = np.dstack(
             (self.fwd_one_hot_coded_seqs, self.fwd_shape_features))
         self.rc_coded_seqs = np.dstack(
-            (self.fwd_one_hot_coded_seqs, self.rc_shape_features))
+            (self.rc_one_hot_coded_seqs, self.rc_shape_features))
         
 class DNABindingModels(object):
     """Container for DNABindingModel objects
