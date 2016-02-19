@@ -274,7 +274,7 @@ class FixedLengthDNASequences(DNASequences):
         """
         return self._naive_score_binding_sites(model, direction)
     
-    def __init__(self, seqs):
+    def __init__(self, seqs, include_shape=True):
         self._seqs = list(seqs)
 
         self._seq_lens = np.array([len(seq) for seq in self._seqs])
@@ -283,15 +283,21 @@ class FixedLengthDNASequences(DNASequences):
 
         self.fwd_one_hot_coded_seqs = one_hot_encode_sequences(self._seqs)
         self.rc_one_hot_coded_seqs = self.fwd_one_hot_coded_seqs[:,::-1,::-1]
-        (self.fwd_shape_features, self.rc_shape_features 
-         ) = code_seqs_shape_features(
-             self._seqs, self.seq_len, len(self._seqs))
-
-        self.fwd_coded_seqs = np.dstack(
-            (self.fwd_one_hot_coded_seqs, self.fwd_shape_features))
-        self.rc_coded_seqs = np.dstack(
-            (self.rc_one_hot_coded_seqs, self.rc_shape_features))
         
+        if include_shape:
+            (self.fwd_shape_features, self.rc_shape_features 
+            ) = code_seqs_shape_features(
+                self._seqs, self.seq_len, len(self._seqs))
+
+            self.fwd_coded_seqs = np.dstack(
+                (self.fwd_one_hot_coded_seqs, self.fwd_shape_features))
+            self.rc_coded_seqs = np.dstack(
+                (self.rc_one_hot_coded_seqs, self.rc_shape_features))
+        else:
+            self.fwd_shape_features, self.rc_shape_features = None, None
+            self.fwd_coded_seqs = self.fwd_one_hot_coded_seqs
+            self.rc_coded_seqs = self.rc_one_hot_coded_seqs
+
 class DNABindingModels(object):
     """Container for DNABindingModel objects
 
