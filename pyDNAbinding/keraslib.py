@@ -1,3 +1,7 @@
+from collections import defaultdict
+
+import numpy as np
+
 import keras
 
 import keras.backend as K
@@ -43,6 +47,55 @@ def theano_log_sum_log_occs(log_occs):
     centered_log_occs = (log_occs - scale_factor)
     centered_rv = TT.log(TT.sum(TT.exp(centered_log_occs), axis=1))
     return centered_rv + scale_factor.flatten()
+
+def iter_weighted_batch_samples(model, batch_iterator, oversampling_ratio=1):
+    """Iter batches where poorly predicted samples are more frequently selected.
+
+    model: the model to predict from
+    batch_iterator: batch iterator to draw samples from
+    oversampling_ratio: how many batch_iterator batches to sample from
+    """
+    assert oversampling_ratio > 0
+
+    while True:
+        # group the output of oversampling_ratio batches together
+        all_batches = defaultdict(list)
+        for i in xrange(oversampling_ratio):
+            for key, val in next(batch_iterator).iteritems():
+                all_batches[key].append(val)
+        # find the batch size
+        batch_size = next(all_batches.itervalues())[0].shape[0]
+        # stack the output
+        for key, batches in all_batches.iteritems():
+            all_batches[key] = np.vstack(batches)
+
+        # weight the batch values
+        pred_vals = model.predict_on_batch(all_batches)
+        weights = np.zeros(batch_size*oversampling_ratio)
+        for key in pred_vals:
+            losses = (pred_vals[key] - all_batches[key])**2
+            # set ambiguous labels to 0
+            losses[all_batches[key] < -0.5] = 0
+            # add to the losses,
+            inner_weights = losses.sum(1)
+            # re-weight the rows with ambiguous labels
+            inner_weights *= losses.shape[1]/((
+                all_batches[key] > -0.5).sum(1) + 1e-6)
+            # make sure that every row has some weight
+            inner_weights += 1e-6
+            weights += inner_weights
+        # normalize the weights to 1
+        weights /= weights.sum()
+
+        # downsample batch_size observations
+        output = {}
+        loss_indices = np.random.choice(
+            len(weights), size=batch_size, replace=False, p=weights)
+        for key in all_batches.keys():
+            output[key] = all_batches[key][loss_indices,:]
+        yield output
+    
+    return
 
 class ConvolutionDNASequenceBinding(Layer):
     def __init__(
