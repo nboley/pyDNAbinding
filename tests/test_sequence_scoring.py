@@ -180,7 +180,7 @@ def profile_multi_convolve(seq_len, n_seqs):
     #    lambda: [(seqs._clever_score_binding_sites(h, True),
     #              seqs._clever_score_binding_sites(h, False)) for h in hs], 
     #    number=1)
-
+    
 def main():
     test_score_shape()
     test_find_best_subseq()

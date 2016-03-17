@@ -141,3 +141,20 @@ def multichannel_convolve(x, h, mode='valid'):
         return multichannel_fftconvolve(x, h, mode)
     else:
         return multichannel_overlap_add_fftconvolve(x, h, mode)
+
+def cross_correlation(seqs):
+    # deal with the shape, and upcast to the next reasonable shape
+    shape = np.array(seqs.shape[1:]) + np.array(seqs.shape[1:]) - 1
+    fshape = [next_good_fshape(x) for x in shape]
+    fslice = tuple([slice(0, int(sz)) for sz in shape])
+    flipped_seqs_fft = np.zeros([seqs.shape[0],] + fshape[:-1] + [fshape[-1]//2+1,], dtype='complex')
+    for i in xrange(seqs.shape[0]):
+        rev_slice = tuple([i,] + [slice(None, None, -1) for sz in shape])
+        flipped_seqs_fft[i] = rfftn(seqs[rev_slice], fshape)
+    rv = np.zeros((seqs.shape[0], seqs.shape[0]), dtype='float32')
+    for i in xrange(seqs.shape[0]):
+        fft_seq = rfftn(seqs[i], fshape)
+        for j in xrange(i+1, seqs.shape[0]):
+            rv[i,j] = irfftn(fft_seq*flipped_seqs_fft[j], fshape)[fslice].max()
+            #print rv[i,j], correlate(seqs[i], seqs[j]).max()
+    return rv

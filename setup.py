@@ -37,7 +37,7 @@ config = {
     'version': '0.1.1',
     'packages': ['pyDNAbinding', ],
     'setup_requires': [],
-    'install_requires': [ 'scipy', 'numpy' ],
+    'install_requires': [ 'scipy', 'numpy', 'psycopg2' ],
     'scripts': [],
     'name': 'pyDNAbinding'
 }
