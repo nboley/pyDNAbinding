@@ -47,9 +47,11 @@ class Data(object):
             hashes.append(hash(tuple(self.outputs.keys())))
             hashes.append(hash(tuple(self.task_ids)))
             for val in self.inputs.values():
+                # the array is required to be c contiguous to calculate the hash
                 hashes.append(
                     hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
             for val in self.outputs.values():
+                # the array is required to be c contiguous to calculate the hash
                 hashes.append(
                     hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
         else:
@@ -59,18 +61,25 @@ class Data(object):
 
     @property
     def cache_fname(self):
-        return "%s.cached.%i.obj" % (type(self), hash(self))
+        """File to write cached file into.
+        
+        This uses a hash over all of the stored data, so it should be completely
+        safe to use. that is, if the underlying data changes then the hash value
+        will change and the cached file will be regenerated.
+        """
+        return "cached%s.%i.obj" % (type(self).__name__, hash(self))
     
     def cache_to_disk(self):
-        """Save self to $HASH.h5.
+        """Save a cached copy of this in an h5 file.
 
-        """        
+        Returns the cached filename.
+        """
         if not os.path.isfile(self.cache_fname):
             self.save(self.cache_fname)
         return self.cache_fname
     
     def save(self, fname):
-        """Save the data into an h5 file.
+        """Save the data into an h5 file named fname.
 
         """
         with h5py.File(fname, "w") as f:
@@ -83,25 +92,35 @@ class Data(object):
                     self._data_type)
     
     @classmethod
-    def _load_sequential(cls, f):
+    def _load_sequential_data(cls, f):
         assert f.attrs['data_type'] == 'sequential'
         inputs = f['inputs']
         outputs = f['outputs']
         task_ids = f['task_ids']
-        return cls(inputs, outputs, task_ids)
+        return inputs, outputs, task_ids
     
     @classmethod
-    def _load_graph(cls, f):
+    def _load_graph_data(cls, f):
         assert f.attrs['data_type'] == 'graph'
         inputs = f['inputs']
         outputs = f['outputs']
         task_ids = f['task_ids']
-        return cls(inputs, outputs, task_ids)
+        return inputs, outputs, task_ids
 
     @classmethod
     def load(cls, fname):
         """Load data from an h5 file.
 
+        Args:
+            cls: type object of the return type
+            fname: h5 file to load
+        
+        Returns:
+            cls object with the inputs, outputs, and task_ids initialized to the
+                values from the h5 file 'fname'
+        
+        Raises: 
+            IOError: if fname isn't able to be read
         """
         print "Loading", fname
         f = h5py.File(fname, 'r')
@@ -109,11 +128,19 @@ class Data(object):
         # would be very little purpose
         data_type = f.attrs['data_type']
         if data_type == 'sequential':
-            return cls._load_sequential(f)
+            inputs, outputs, task_ids = cls._load_sequential_data(f)
         elif data_type == 'graph':
-            return cls._load_graph(f)
+            inputs, outputs, task_ids = cls._load_graph_data(f)
         else:
             raise ValueError,"Unrecognized data type '{}'".format(data_type)
+        # we have to jump through some hoops to allow for proper subclassing. We
+        # want the init methods to be able to allow for flexible argument 
+        # patterns, but the interface all uses inputs, outputs, and taskids. So
+        # we initialzie a class without calling init to get the correct type, 
+        # and then we call __init__ on data directly.
+        instance = cls.__new__(cls)
+        Data.__init__(instance, inputs, outputs, task_ids)
+        return instance
     
     def __init__(self, inputs, outputs, task_ids=None):
         self._cached_hash = None
@@ -250,14 +277,30 @@ class Data(object):
             assert isinstance(outputs, (np.ndarray, h5py._hl.dataset.Dataset))
             new_outputs = self.outputs[observation_indices]
         elif self._data_type == 'graph':
+            # indices must be sorted to subset an h5 array. This is fast, so we
+            # jsut do it once at the start
+            if isinstance(observation_indices, np.ndarray):
+                observation_indices.sort()
+            # subset the inputs
             new_inputs = {}
             for key, data in self.inputs.iteritems():
-                assert isinstance(data, (np.ndarray, h5py._hl.dataset.Dataset))
-                new_inputs[key] = data[observation_indices]
+                if isinstance(data, np.ndarray):
+                    new_inputs[key] = data[observation_indices]
+                elif isinstance(data, h5py._hl.dataset.Dataset):
+                    new_inputs[key] = data[observation_indices.tolist()]
+                else:
+                    raise ValueError, "Unrecognized data array type '%s'" \
+                        % type(data)
+            # subset the outputs
             new_outputs = {}
             for key, data in self.outputs.iteritems():
-                assert isinstance(data, (np.ndarray, h5py._hl.dataset.Dataset))
-                new_outputs[key] = data[observation_indices]
+                if isinstance(data, np.ndarray):
+                    new_outputs[key] = data[observation_indices]
+                elif isinstance(data, h5py._hl.dataset.Dataset):
+                    new_outputs[key] = data[observation_indices.tolist()]
+                else:
+                    raise ValueError, "Unrecognized data array type '%s'" \
+                        % type(data)
         else:
             assert False,"Unrecognized model type '{}'".format(self._data_type)
 
@@ -297,8 +340,7 @@ class GenomicRegionsAndLabels(Data):
     """Subclass Data to handfle the common case where the input is a set of 
        genomic regions and the output is a single labels matrix. 
     
-    """
-    
+    """    
     @property
     def label_ids(self):
         return self.task_ids['labels']
@@ -371,11 +413,14 @@ class SamplePartitionedData():
         self._cached_hash = abs(hash(tuple(hashes)))
         return self._cached_hash
 
+    @property
+    def cache_fname(self):
+        return "cached%s.%i.obj" % (type(self).__name__, hash(self))
+
     def cache_to_disk(self):
-        fname = "%s.cached.%i.obj" % (type(self), hash(self))
-        if not os.path.isfile(fname):
-            self.save(fname)
-        return fname
+        if not os.path.isfile(self.cache_fname):
+            self.save(self.cache_fname)
+        return self.cache_fname
     
     def save(self, fname):
         with h5py.File(fname, "w") as f:
@@ -386,14 +431,46 @@ class SamplePartitionedData():
 
     @classmethod
     def load(cls, fname):
+        """Load data from an h5 file.
+
+        Args:
+            cls: type object of the return type
+            fname: h5 file to load
+        
+        Returns:
+            cls object with the inputs, outputs, and task_ids initialized to the
+                values from the h5 file 'fname'
+        
+        Raises: 
+            IOError: if fname isn't able to be read
+        """
         rv  = {}
-        with h5py.File(fname) as f:
+        with h5py.File(fname, 'r') as f:
             for key, data in f.iteritems():
                 rv[key] = Data(**data)
         return cls(rv)
 
     def iter_batches(
             self, batch_size, repeat_forever=False, **kwargs):
+        """Iterate data in batches. 
+
+        SamplePartitionedData is a container object that stores samples and 
+        data. This method calls of each of the data iterators, and adds the 
+        proper sample id into the returned data dictionary.
+        
+        Args:
+            batch_size: size of the first dimension of the returned data.
+            repeat_forever: if set then continuously iterate through the data.
+            **kwargs: additional arguments to pass to the sub iterators
+        
+        Returns:
+            cls object with the inputs, outputs, and task_ids initialized to the
+                values from the h5 file 'fname'
+        
+        Raises: 
+            IOError: if fname isn't able to be read
+        """
+
         ## find the number of observations to sample from each batch
         # To make this work, I would need to randomly choose the extra observations
         fractions = np.array([
@@ -419,7 +496,8 @@ class SamplePartitionedData():
                 for sample_id in self.sample_ids:
                     if sample_id not in iterators:
                         cnts.append(0)
-                    elif sample_id in iterators:
+                    else:
+                        assert sample_id in iterators
                         iterator = iterators[sample_id]
                         data = next(iterator)
                         cnt = None
@@ -428,8 +506,6 @@ class SamplePartitionedData():
                             if cnt == None: cnt = vals.shape[0]
                             assert cnt == vals.shape[0]
                         cnts.append(cnt)
-                    else:
-                        assert False
                 
                 for key, vals in grpd_res.iteritems():
                     grpd_res[key] = np.concatenate(grpd_res[key], axis=0)
