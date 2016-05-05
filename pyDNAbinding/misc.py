@@ -15,6 +15,7 @@ def logistic(x):
     return 1/(1+e_x)
 
 def load_fastq(fp, maxnum=float('inf')):
+    if maxnum is None: maxnum=float('inf')
     seqs = []
     for i, line in enumerate(fp):
         if i/4 >= maxnum: break

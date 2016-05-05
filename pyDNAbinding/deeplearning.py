@@ -1,3 +1,12 @@
+import os
+
+import math
+import hashlib
+from itertools import chain
+from collections import OrderedDict, defaultdict
+
+import numpy as np
+import h5py
 
 class Data(object):
     """Store and iterate through data from a deep learning model.
@@ -38,22 +47,27 @@ class Data(object):
             hashes.append(hash(tuple(self.outputs.keys())))
             hashes.append(hash(tuple(self.task_ids)))
             for val in self.inputs.values():
-                hashes.append(hashlib.sha1(val).hexdigest())
+                hashes.append(
+                    hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
             for val in self.outputs.values():
-                hashes.append(hashlib.sha1(val).hexdigest())
+                hashes.append(
+                    hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
         else:
             assert False, "Unrecognized data type '{}'".format(self._data_type)
         self._cached_hash = abs(hash(tuple(hashes)))
         return self._cached_hash
+
+    @property
+    def cache_fname(self):
+        return "%s.cached.%i.obj" % (type(self), hash(self))
     
     def cache_to_disk(self):
         """Save self to $HASH.h5.
 
-        """
-        fname = "%s.cached.%i.obj" % (type(self), hash(self))
-        if not os.path.isfile(fname):
-            self.save(fname)
-        return fname
+        """        
+        if not os.path.isfile(self.cache_fname):
+            self.save(self.cache_fname)
+        return self.cache_fname
     
     def save(self, fname):
         """Save the data into an h5 file.
@@ -89,7 +103,8 @@ class Data(object):
         """Load data from an h5 file.
 
         """
-        f = h5py.File(fname)
+        print "Loading", fname
+        f = h5py.File(fname, 'r')
         # This should probably also add a close method, but I there
         # would be very little purpose
         data_type = f.attrs['data_type']
@@ -367,7 +382,7 @@ class SamplePartitionedData():
             for key, data in self._data.iteritems():
                 sample_fname = data.cache_to_disk()
                 f[key] = h5py.ExternalLink(sample_fname, "/")
-        return
+        return fname
 
     @classmethod
     def load(cls, fname):

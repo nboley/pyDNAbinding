@@ -528,7 +528,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
         # filter, and then multiply by negative 1 (so that higher scores 
         # correspond to higher binding affinity )
         convolutional_filter = self.ddg_array.copy()
-        convolutional_filter[0,:4] = ref_energy
+        convolutional_filter[0,:4] += ref_energy
         convolutional_filter *= -1
         ConvolutionalDNABindingModel.__init__(
             self, convolutional_filter, **kwargs)

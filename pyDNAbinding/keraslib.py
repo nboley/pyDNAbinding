@@ -73,6 +73,7 @@ def iter_weighted_batch_samples(model, batch_iterator, oversampling_ratio=1):
         pred_vals = model.predict_on_batch(all_batches)
         weights = np.zeros(batch_size*oversampling_ratio)
         for key in pred_vals:
+            if key.endswith('binding_occupancies'): continue
             losses = (pred_vals[key] - all_batches[key])**2
             # set ambiguous labels to 0
             losses[all_batches[key] < -0.5] = 0
@@ -97,6 +98,58 @@ def iter_weighted_batch_samples(model, batch_iterator, oversampling_ratio=1):
     
     return
 
+class ConvolutionDNAShapeBinding(Layer):
+    def __init__(
+            self, nb_motifs, motif_len, 
+            init='glorot_uniform', 
+            **kwargs):
+        self.nb_motifs = nb_motifs
+        self.motif_len = motif_len
+        self.input = K.placeholder(ndim=4)
+        
+        self.init = lambda x: (
+            initializations.get(init)(x), 
+            K.zeros((self.nb_motifs,)) 
+        )
+        super(ConvolutionDNAShapeBinding, self).__init__(**kwargs)
+
+    def get_config(self):
+        config = {'name': self.__class__.__name__,
+                  'nb_motifs': self.nb_motifs,
+                  'motif_len': self.motif_len, 
+                  'init': self.init.__name__}
+        base_config = super(ConvolutionDNAShapeBinding, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def build(self):
+        input_dim = self.input_shape[1]
+        self.W_shape = (
+            self.nb_motifs, 1, self.motif_len, 6)
+        self.W, self.b = self.init(self.W_shape)
+        self.trainable_weights = [self.W, self.b]
+    
+    @property
+    def output_shape(self):
+        return (# number of obseravations
+                self.input_shape[0], 
+                self.nb_motifs,
+                # sequence length minus the motif length
+                self.input_shape[2], #-self.motif_len+1,
+                2)
+    
+    def get_output(self, train=False):
+        X = self.get_input(train)
+        fwd_rv = K.conv2d(X[:,:,:,:6], 
+                          self.W, 
+                          border_mode='valid') \
+                 + K.reshape(self.b, (1, self.nb_motifs, 1, 1))
+        rc_rv = K.conv2d(X[:,:,:,-6:][:,::-1,::-1], 
+                         self.W, 
+                         border_mode='valid') \
+                + K.reshape(self.b, (1, self.nb_motifs, 1, 1))
+        return K.concatenate((fwd_rv, rc_rv), axis=3)
+        #return rc_rv
+
 class ConvolutionDNASequenceBinding(Layer):
     def __init__(
             self,
@@ -114,16 +167,17 @@ class ConvolutionDNASequenceBinding(Layer):
         self.W = None
         self.b = None
         
-        if isinstance(init, ConvolutionalDNABindingModel):
-            self.init = lambda x: (
-                K.variable(-init.ddg_array[None,None,:,:]), 
-                K.variable(np.array([-init.ref_energy,])[:,None]) 
-            )
-        else:
-            self.init = lambda x: (
-                initializations.get(init)(x), 
-                K.zeros((self.nb_motifs,)) 
-            )
+        #if isinstance(init, ConvolutionalDNABindingModel):
+        #    self.init = lambda x: (
+        #        K.variable(-init.ddg_array[None,None,:,:]), 
+        #        K.variable(np.array([-init.ref_energy,])[:,None]) 
+        #    )
+        #else:
+        #    self.init = lambda x: (
+        #        initializations.get(init)(x), 
+        #        K.zeros((self.nb_motifs,)) 
+        #    )
+        self.init = initializations.get(init)
         super(ConvolutionDNASequenceBinding, self).__init__(**kwargs)
 
     def get_config(self):
@@ -157,7 +211,8 @@ class ConvolutionDNASequenceBinding(Layer):
         else:
             self.W_shape = (
                 self.nb_motifs, 4, 1, self.motif_len)
-        self.W, self.b = self.init(self.W_shape)
+        self.W = self.init(self.W_shape) 
+        self.b = K.zeros((self.nb_motifs,))
         return
 
     def build(self):
@@ -166,8 +221,8 @@ class ConvolutionDNASequenceBinding(Layer):
         if self.W is None:
             assert self.b is None
             self.init_filters()
-        self.params = [self.W[0], self.b[0]]
-    
+        self.trainable_weights = [self.W[0], self.b[0]]
+
     @property
     def output_shape(self):
         return (# number of obseravations
@@ -189,6 +244,8 @@ class ConvolutionDNASequenceBinding(Layer):
             X_fwd = X
             X_rc = X
 
+        print self.W
+        print self.b
         if self.W[1] is not None:
             W = self.W[0][self.W[1],:,:,:]
         else:
@@ -278,8 +335,8 @@ class ConvolutionBindingSubDomains(Layer):
             self.init_filters(self.input_shape[1])
         print "Subdomains Filter Shape:", self.W_shape
         #assert self.input_shape[3] == self.W_shape[3]
-        self.params = [self.W[0], self.b[0]]
-    
+        self.trainable_weights = [self.W[0], self.b[0]]
+
     @property
     def output_shape(self):
         return (# number of obseravations
@@ -333,8 +390,8 @@ class LogNormalizedOccupancy(Layer):
         # fwd and rc sequence
         #assert self.input_shape[3] == 2
         self.chem_affinity = K.variable(self.init_chem_affinity)
-        self.params = [self.chem_affinity]
-    
+        self.trainable_weights = [self.chem_affinity]
+
     @property
     def output_shape(self):
         #return self.input_shape
@@ -369,7 +426,7 @@ class LogNormalizedOccupancy(Layer):
         #stop = min(self.output_shape[3], 
         #           self.output_shape[3]-(self.steric_hindrance_win_len-1))
         #rv = log_occs[:,:,:,start:stop] - log_norm_factor
-        rv = log_occs - log_norm_factor
+        rv = (log_occs - log_norm_factor)
         return K.reshape(
             rv, 
             (X.shape[0], 2*X.shape[1], 1, X.shape[3])
@@ -407,7 +464,11 @@ class OccMaxPool(Layer):
         super(OccMaxPool, self).__init__(**kwargs)
 
     def get_config(self):
-        config = {'name': self.__class__.__name__}
+        config = {
+            'name': self.__class__.__name__, 
+            'num_tracks': self.num_tracks, 
+            'num_bases': self.num_bases
+        }
         base_config = super(OccMaxPool, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
@@ -431,7 +492,7 @@ class OccMaxPool(Layer):
         )
 
     def get_output(self, train=False):
-        print "OccMaxPool", self.output_shape
+        print "OccMaxPool", self.output_shape, self.input_shape
         num_tracks = (
             self.input_shape[1] if self.num_tracks == 'full' 
             else self.num_tracks
@@ -448,7 +509,145 @@ class OccMaxPool(Layer):
             strides=(num_tracks, num_bases),
             pool_mode='max'
         )
+        rv = K.permute_dimensions(rv, (0,2,1,3))
+        return rv
+
+class ConvolutionCoOccupancy(Layer):
+    def __init__(
+            self,
+            nb_domains, 
+            domain_len, 
+            init='glorot_uniform', 
+            **kwargs):
+        self.nb_domains = nb_domains
+        self.domain_len = domain_len
+
+        self.input = K.placeholder(ndim=4)
+        
+        self.init = lambda x: (
+            (initializations.get(init)(x), None),
+            (K.zeros((self.nb_domains,)), None) 
+        )
+        self.kwargs = kwargs
+        
+        self.W_shape = None
+        self.W = None
+        self.b = None
+        
+        super(ConvolutionCoOccupancy, self).__init__(**kwargs)
+
+    def get_config(self):
+        config = {'name': self.__class__.__name__,
+                  'nb_domains': self.nb_domains,
+                  'domain_len': self.domain_len, 
+                  'init': self.init.__name__}
+        base_config = super(ConvolutionCoOccupancy, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def create_clone(self):
+        """
+        
+        """
+        rv = type(self)(
+            self.nb_domains, 
+            self.domain_len, 
+            self.init,
+            **self.kwargs)
+        rv.W = self.W
+        rv.b = self.b
+        rv.W_shape = self.W_shape
+        return rv
+
+    def init_filters(self, num_input_filters):
+        self.W_shape = (
+            self.nb_domains, num_input_filters, 1, self.domain_len)
+        self.W, self.b = self.init(self.W_shape)
+        return
+
+    def build(self):
+        # make sure that every occupancy has been flattenned into a single track
+        assert self.input_shape[2] == 1
+        if self.W is None:
+            assert self.b is None
+            self.init_filters(self.input_shape[1])
+        print "Occ Subdomains Filter Shape:", self.W_shape
+        #assert self.input_shape[3] == self.W_shape[3]
+        self.trainable_weights = [self.W[0], self.b[0]]
+
+    @property
+    def output_shape(self):
+        return (# number of obseravations
+                self.input_shape[0], 
+                self.nb_domains,
+                # sequence length minus the motif length
+                1,
+                self.input_shape[3]-self.domain_len+1)
+    
+    def get_output(self, train=False):
+        print "ConvolutionCoOccupancy", self.output_shape, self.input_shape
+        X = self.get_input(train)
+        if self.W[1] is not None:
+            W = self.W[0][self.W[1],:,:,:]
+        else:
+            W = self.W[0]
+        if self.b[1] is not None:
+            b = self.b[0][self.b[1]]
+        else:
+            b = self.b[0]
+        rv = K.conv2d(X[:,:,:,:], W, border_mode='valid')  \
+                 + K.reshape(b, (1, self.nb_domains, 1, 1))
+        #return rv.dimshuffle((0,3,2,1))
+        return rv #K.permute_dimensions(rv, (0,3,2,1))
+
+"""
+class OccConv(Layer):
+    def __init__(self, num_bases, **kwargs, init='glorot_uniform'):
+        self.num_bases = num_bases
+        self.input = K.placeholder(ndim=4)
+        self.init = lambda x: (
+            initializations.get(init)(x), 
+            K.zeros((self.nb_motifs,)) 
+        )
+        
+        super(OccConv, self).__init__(**kwargs)
+
+    def get_config(self):
+        config = {'name': self.__class__.__name__, 
+                  'num_bases': self.num_bases}
+        base_config = super(OccConv, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def init_filters(self):
+        self.W_shape = (
+            self.nb_motifs, 4, 1, self.motif_len)
+        self.W, self.b = self.init(self.W_shape)
+        return
+
+    @property
+    def output_shape(self):
+        #return self.input_shape
+        assert self.input_shape[2] == 1
+        return (
+            self.input_shape[0],
+            self.input_shape[1], # + (
+            #    1 if self.input_shape[1]%self.num_tracks > 0 else 0),
+            1,
+            self.input_shape[3]-num_bases+1# + (
+            #    1 if self.input_shape[3]%self.num_bases > 0 else 0)
+        )
+
+    def get_output(self, train=False):
+        print "OccConv", self.output_shape
+        X = self.get_input(train)
+        X = K.permute_dimensions(X, (0,2,1,3))
+        rv = K.conv2d(
+            X, 
+            pool_size=(num_tracks, num_bases), 
+            strides=(num_tracks, num_bases),
+            pool_mode='max'
+        )
         return K.permute_dimensions(rv, (0,2,1,3))
+"""
 
 
 class LogAnyBoundOcc(Layer):
@@ -480,3 +679,15 @@ class LogAnyBoundOcc(Layer):
         # thus this helps to regularize the optimization procedure
         rv = K.log(0.05*max_occ + 0.95*at_least_1_bnd)
         return rv
+
+custom_objects = {
+  'ConvolutionDNASequenceBinding': ConvolutionDNASequenceBinding,
+  'ConvolutionBindingSubDomains': ConvolutionBindingSubDomains,
+  'LogNormalizedOccupancy': LogNormalizedOccupancy,
+  'TrackMax': TrackMax,
+  'OccMaxPool': OccMaxPool,
+  'LogAnyBoundOcc': LogAnyBoundOcc,
+  'ConvolutionCoOccupancy': ConvolutionCoOccupancy,
+  'LogAnyBoundOcc': LogAnyBoundOcc,
+  'LogNormalizedOccupancy': LogNormalizedOccupancy
+}
