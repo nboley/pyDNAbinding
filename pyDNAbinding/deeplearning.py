@@ -12,6 +12,9 @@ class Data(object):
     """Store and iterate through data from a deep learning model.
 
     """
+    def __len__(self):
+        return len(self.inputs.values()[0])
+
     def _save_sequential(self, f):
         assert self._data_type == 'sequential'
         f.attrs['data_type'] = self._data_type
@@ -201,7 +204,8 @@ class Data(object):
                 "The specified task_id ({}) does not exist".format(task_id)
             labels = labels[:,0]
         else:
-            assert task_id is not None, "Must choose the task id to balance on in the multi-task setting"
+            assert task_id is not None, \
+                "Must choose the task id to balance on in the multi-task setting"
             labels = labels[:,self.task_ids.index(task_id)]
 
         one_indices = np.random.choice(
@@ -220,6 +224,9 @@ class Data(object):
 
     def iter_batches_from_indices_generator(
             self, batch_size, repeat_forever, indices_generator):
+        """XXX
+
+        """
         i = 0
         n = int(math.ceil(self.num_observations/float(batch_size)))
         permutation = None
@@ -308,29 +315,43 @@ class Data(object):
         rv.__class__ = self.__class__
         return rv
     
-    def balance_data(self, task_id=None):
-        indices = self.build_label_balanced_indices(task_id=task_id)
+    def balance_data(self, label_key=None, task_id=None):
+        indices = self.build_label_balanced_indices(
+            label_key=label_key, task_id=task_id)
         return self.subset_observations(indices)
     
-    def subset_tasks(self, desired_task_ids):
+    def subset_tasks(self, desired_task_ids, label_key=None):
         """Return a copy of self that only contains desired_task_ids.
 
+        FIX THIS FUNCTION
+        XXX - DOCUMENT
         """
         # make chained filtering more convenient by defaulting to 
         # all tfs if none is passed
         if desired_task_ids is None:
             return self
         
+        if label_key is None:
+            if len(self.outputs) > 1:
+                raise ValueError(
+                    "If there are multiple output arrays then label_key must be specified.")
+            else:
+                label_key = self.outputs.keys()[0]
+        
         new_outputs = {}
+        # pass through the data for outputs not equal to label key
         for task_key, data in self.outputs.iteritems():
-            task_indices = []
-            for task_id in desired_task_ids[task_key]:
-                try: task_indices.append(self.task_ids[task_key].index(task_id))
-                except ValueError: task_indices.append(-1)
-            task_indices = np.array(task_indices)
+            if task_key != label_key:
+                new_outputs[task_key] = data
+            
+        task_indices = []
+        for task_id in desired_task_ids[label_key]:
+            try: task_indices.append(self.task_ids[label_key].index(task_id))
+            except ValueError: task_indices.append(-1)
+        task_indices = np.array(task_indices)
 
-            new_data = np.insert(data, 0, -1, axis=1)
-            new_outputs[task_key] = new_data[:, task_indices+1]
+        new_data = np.insert(data, 0, -1, axis=1)
+        new_outputs[label_key] = new_data[:, task_indices+1]
 
         rv = Data(self.inputs, new_outputs, task_ids=desired_task_ids)
         rv.__class__ = self.__class__
@@ -341,40 +362,42 @@ class GenomicRegionsAndLabels(Data):
        genomic regions and the output is a single labels matrix. 
     
     """    
-    @property
-    def label_ids(self):
-        return self.task_ids['labels']
-
+    def __len__(self):
+        return len(self.regions)
+    
     @property
     def regions(self):
         return self.inputs['regions']
 
-    @property
-    def labels(self):
-        return self.outputs['labels']
+    def subset_regions_by_rank(self, max_num_regions, use_top_regions=False, seed=0):
+        """Return a copy of self containing at most max_num_regions regions.
 
-    def subset_pks_by_rank(self, max_num_peaks, use_top_accessible, seed=0):
-        """Return a copy of self containing at most max_num_peaks peaks.
-
-        max_num_peaks: the maximum number of peaks to return
-        use_top_accessible: return max_num_peaks most accessible peaks
+        max_num_regions: the maximum number of regions to return
+        use_top_accessible: return max_num_regions most accessible regions
         """
-        if max_num_peaks is None:
-            max_num_peaks = len(self.regions)
+        if max_num_regions is None:
+            max_num_regions = len(self.regions)
+
+        # set a seed so we can use cached regions between debug rounds
+        np.random.seed(seed)
         
-        # sort the peaks by accessibility
-        if use_top_accessible:
+        # sort the regions by accessibility
+        if use_top_regions:
+            if 'signalValue' not in self.regions:
+                raise ValueError(
+                    "Can not subset top regions unless a signal value is provided")
+            # sort indices by signal value, breaking ties using a random sort
             indices = np.lexsort(
-                (self.regions['start'], -self.regions['signalValue'])
+                (np.random.random(len(self.regions)), 
+                 -self.regions['signalValue'])
             )
-        # sort the peaks randomly
+        # sort the regions randomly
         else:
-            # set a seed so we can use cached peaks between debug rounds
-            np.random.seed(seed)
             indices = np.argsort(np.random.random(len(self.regions)))
-        return self.subset_observations(indices[:max_num_peaks])
+        
+        return self.subset_observations(indices[:max_num_regions])
     
-    def subset_pks_by_contig(
+    def subset_regions_by_contig(
             self, contigs_to_include=None, contigs_to_exclude=None):
         assert (contigs_to_include is None) != (contigs_to_exclude is None), \
             "Either contigs_to_include or contigs_to_exclude must be specified"
@@ -384,16 +407,17 @@ class GenomicRegionsAndLabels(Data):
         if contigs_to_exclude is not None:
             contigs_to_exclude = set(contigs_to_exclude)
         indices = np.array([
-            i for i, pk in enumerate(self.regions) 
-            if (contigs_to_exclude is None or pk[0] not in contigs_to_exclude)
-            and (contigs_to_include is None or pk[0] in contigs_to_include)
+            i for i, region in enumerate(self.regions) 
+            if (contigs_to_exclude is None or region[0] not in contigs_to_exclude)
+            and (contigs_to_include is None or region[0] in contigs_to_include)
         ])
         return self.subset_observations(indices)
     
     def __init__(self, regions, labels, inputs={}, task_ids=None):
         # add regions to the input
         if 'regions' in inputs:
-            raise ValueError, "'regions' input is passed as an argument and also specified in inputs"
+            raise ValueError(
+                "'regions' input is passed as an argument and also specified in inputs")
         inputs['regions'] = regions
         Data.__init__(self, inputs, {'labels': labels}, {'labels': task_ids})
 
@@ -401,6 +425,9 @@ class SamplePartitionedData():
     """Store data partitioned by sample id.
 
     """
+    def __len__(self):
+        return sum(len(x) for x in self._data.itervalues())
+
     @property
     def sample_ids(self):
         return self._data.keys()
@@ -418,6 +445,10 @@ class SamplePartitionedData():
         return "cached%s.%i.obj" % (type(self).__name__, hash(self))
 
     def cache_to_disk(self):
+        """Save a cached copy of this in an h5 file.
+
+        Returns the cached filename.
+        """
         if not os.path.isfile(self.cache_fname):
             self.save(self.cache_fname)
         return self.cache_fname
@@ -450,8 +481,11 @@ class SamplePartitionedData():
                 rv[key] = Data(**data)
         return cls(rv)
 
-    def iter_batches(
-            self, batch_size, repeat_forever=False, **kwargs):
+    def iter_batches(self, 
+                     batch_size, 
+                     repeat_forever=False, 
+                     sample_weights=None, 
+                     **kwargs):
         """Iterate data in batches. 
 
         SamplePartitionedData is a container object that stores samples and 
@@ -472,8 +506,10 @@ class SamplePartitionedData():
         """
 
         ## find the number of observations to sample from each batch
-        # To make this work, I would need to randomly choose the extra observations
-        fractions = np.array([
+        # if sample weights is not set, then use equal weights
+        if sample_weights is None:
+            sample_weights = np.ones(len(self._data), dtype=float)
+        fractions = sample_weights*np.array([
             x.num_observations for x in self._data.values()], dtype=float)
         fractions = fractions/fractions.sum()
         inner_batch_sizes = np.array(batch_size*fractions, dtype=int)
