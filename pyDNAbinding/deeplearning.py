@@ -369,7 +369,8 @@ class GenomicRegionsAndLabels(Data):
     def regions(self):
         return self.inputs['regions']
 
-    def subset_regions_by_rank(self, max_num_regions, use_top_regions=False, seed=0):
+    def _subset_regions_by_rank(
+            self, max_num_regions, use_top_regions=False, seed=0):
         """Return a copy of self containing at most max_num_regions regions.
 
         max_num_regions: the maximum number of regions to return
@@ -396,6 +397,14 @@ class GenomicRegionsAndLabels(Data):
             indices = np.argsort(np.random.random(len(self.regions)))
         
         return self.subset_observations(indices[:max_num_regions])
+
+    def subset_random_regions(self, max_num_regions, seed=0):
+        return self._subset_regions_by_rank(
+            max_num_regions, use_top_regions=False, seed=seed)
+    
+    def subset_top_regions(self, max_num_regions, seed=0):
+        return self._subset_regions_by_rank(
+            max_num_regions, use_top_regions=True, seed=seed)
     
     def subset_regions_by_contig(
             self, contigs_to_include=None, contigs_to_exclude=None):
@@ -592,8 +601,9 @@ def test_sample_partitioned_data():
     s = SamplePartitionedData({'s1': s1, 's2': s2})
     fname = s.cache_to_disk()
     s2 = SamplePartitionedData.load(fname)
-    for x in s2.iter_batches(50):
+    for x in s2.iter_batches(10):
         for key, val in x.iteritems():
             print key, val.shape
+            print val
         break
     return
