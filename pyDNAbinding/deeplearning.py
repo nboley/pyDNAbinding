@@ -8,6 +8,20 @@ from collections import OrderedDict, defaultdict
 import numpy as np
 import h5py
 
+def _iter_array_slices(data, slize_size=5000):
+    for i in xrange(0, data.shape[0], slize_size):
+        yield slice(i, i+slize_size)
+
+def _memorysafe_create_dataset(h5_obj, dset_name, data):
+    if isinstance(data, (np.ndarray, h5py._hl.dataset.Dataset)):
+        dset = h5_obj.create_dataset(
+            dset_name, shape=data.shape, dtype=data.dtype)
+        for subset_indices in _iter_array_slices(data):
+            dset[subset_indices] = data[subset_indices]
+    else:
+        dset = h5_obj.create_dataset(dset_name, data=data)
+    return dset
+
 class Data(object):
     """Store and iterate through data from a deep learning model.
 
@@ -18,9 +32,9 @@ class Data(object):
     def _save_sequential(self, f):
         assert self._data_type == 'sequential'
         f.attrs['data_type'] = self._data_type
-        inputs = f.create_dataset("inputs", data=self.inputs)
-        outputs = f.create_dataset("outputs", data=self.outputs)
-        task_ids = f.create_dataset("task_ids", data=self.task_ids)
+        inputs = _memorysafe_create_dataset(f, "inputs", data=self.inputs)
+        outputs = _memorysafe_create_dataset(f, "outputs", data=self.outputs)
+        task_ids = _memorysafe_create_dataset(f, "task_ids", data=self.task_ids)
         return
 
     def _save_graph(self, f):
@@ -28,13 +42,13 @@ class Data(object):
         f.attrs['data_type'] = self._data_type
         inputs = f.create_group("inputs")
         for key, val in self.inputs.iteritems():
-            inputs.create_dataset(key, data=val)        
+            _memorysafe_create_dataset(inputs, key, data=val)        
         outputs = f.create_group("outputs")
         for key, val in self.outputs.iteritems():
-            outputs.create_dataset(key, data=val)
+            _memorysafe_create_dataset(outputs, key, data=val)
         task_ids = f.create_group("task_ids")
         for key, val in self.task_ids.iteritems():
-            task_ids.create_dataset(key, data=val)
+            _memorysafe_create_dataset(task_ids, key, data=val)
         return
 
     def __hash__(self):
@@ -125,7 +139,7 @@ class Data(object):
         Raises: 
             IOError: if fname isn't able to be read
         """
-        print "Loading", fname
+        print "Attempting to load", fname
         f = h5py.File(fname, 'r')
         # This should probably also add a close method, but I there
         # would be very little purpose
