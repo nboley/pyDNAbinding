@@ -13,7 +13,9 @@ def _iter_array_slices(data, slize_size=5000):
         yield slice(i, i+slize_size)
 
 def _memorysafe_create_dataset(h5_obj, dset_name, data):
-    if isinstance(data, (np.ndarray, h5py._hl.dataset.Dataset)):
+    if isinstance(data, h5py._hl.dataset.Dataset):
+        h5_obj[dset_name] = data
+    elif isinstance(data, np.ndarray):
         dset = h5_obj.create_dataset(
             dset_name, shape=data.shape, dtype=data.dtype)
         for subset_indices in _iter_array_slices(data):
