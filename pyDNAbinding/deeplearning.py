@@ -14,15 +14,31 @@ def _iter_array_slices(data, slize_size=5000):
 
 def _memorysafe_create_dataset(h5_obj, dset_name, data):
     if isinstance(data, h5py._hl.dataset.Dataset):
-        h5_obj[dset_name] = data
+        h5_obj.copy(data, dset_name)
     elif isinstance(data, np.ndarray):
         dset = h5_obj.create_dataset(
             dset_name, shape=data.shape, dtype=data.dtype)
         for subset_indices in _iter_array_slices(data):
             dset[subset_indices] = data[subset_indices]
     else:
-        dset = h5_obj.create_dataset(dset_name, data=data)
-    return dset
+        raise ValueError("Unrecognized data set type: {}".format(type(data)) ) 
+    return
+
+def _hash_array(data):
+    chunks_hash_vals = []
+    for subset_indices in _iter_array_slices(data):
+        chunks_hash_vals.append(
+            hashlib.sha1(np.ascontiguousarray(data[subset_indices])).hexdigest()
+        )
+    return abs(hash("".join(chunks_hash_vals)))
+
+def _fancy_index_array(array, indices):
+    rv_shape = list(array.shape)
+    rv_shape[0] = len(indices)
+    rv = np.zeros(rv_shape, dtype=array.dtype)
+    for subset_i, i in enumerate(indices):
+        rv[subset_i] = array[i]
+    return rv
 
 class Data(object):
     """Store and iterate through data from a deep learning model.
@@ -58,8 +74,8 @@ class Data(object):
             return self._cached_hash
         hashes = []
         if self._data_type == 'sequential':
-            hashes.append(hashlib.sha1(self.input).hexdigest())
-            hashes.append(hashlib.sha1(self.output).hexdigest())
+            hashes.append(_hash_array(self.input))
+            hashes.append(_hash_array(self.output))
             hashes.append(hash(self.task_ids))
         elif self._data_type == 'graph':
             hashes.append(hash(tuple(self.inputs.keys())))
@@ -67,12 +83,10 @@ class Data(object):
             hashes.append(hash(tuple(self.task_ids)))
             for val in self.inputs.values():
                 # the array is required to be c contiguous to calculate the hash
-                hashes.append(
-                    hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
+                hashes.append(_hash_array(val))
             for val in self.outputs.values():
                 # the array is required to be c contiguous to calculate the hash
-                hashes.append(
-                    hashlib.sha1(np.ascontiguousarray(val)).hexdigest())
+                hashes.append(_hash_array(val))
         else:
             assert False, "Unrecognized data type '{}'".format(self._data_type)
         self._cached_hash = abs(hash(tuple(hashes)))
@@ -173,9 +187,12 @@ class Data(object):
             assert self.num_observations == outputs.shape[0]
             # if no task ids are set, set them to indices
             if task_ids is not None:
+                if not isinstance(task_ids, (np.ndarray, h5py._hl.dataset.Dataset)):
+                    raise ValueError, "The task ids must be an array type"
                 assert len(task_ids) == outputs.shape[1]
             else:
-                task_ids = [str(x) for x in xrange(1, outputs.shape[1]+1)]
+                task_ids = np.array(
+                    [str(x) for x in xrange(1, outputs.shape[1]+1)])
         # otherwise assume that this is a graph type model
         else:
             self.num_observations = inputs.values()[0].shape[0]
@@ -194,9 +211,11 @@ class Data(object):
                 if key in task_ids:
                     if len(task_ids[key]) != outputs[key].shape[1]:
                         raise ValueError, "The number of task ids for key '{}' does not match the output shape".format()
+                    if not isinstance(task_ids[key], (np.ndarray, h5py._hl.dataset.Dataset)):
+                        raise ValueError, "The task ids must be an array type"
                 else:
-                    task_ids[key] = [
-                        str(x) for x in xrange(1, outputs[key].shape[1]+1)]
+                    task_ids[key] = np.array([
+                        str(x) for x in xrange(1, outputs[key].shape[1]+1)])
             self._data_type = "graph"
 
         self.task_ids = task_ids
@@ -209,8 +228,8 @@ class Data(object):
             assert task_id is None
             labels = self.outputs
         else:
-            if label_name is None and len(self.outputs) == 1:
-                label_name = next(self.inputs.iterkeys())
+            if label_key is None and len(self.outputs) == 1:
+                labels = next(self.outputs.itervalues())
             else:
                 assert task_id is not None
                 labels = self.inputs[task_id]
@@ -254,17 +273,18 @@ class Data(object):
             indices = permutation[subset]
             # sort the indices because h5 indexing requires it
             indices.sort()
+            assert len(indices) != len(set(indices)), 'Indices must be unique'
             if self._data_type == 'sequential':
                 rv = (
-                    self.inputs[indices.tolist()], 
-                    self.outputs[indices.tolist()]
+                    _fancy_index_array(self.inputs, indices),
+                    _fancy_index_array(self.outputs, indices)
                 )
             else:
                 rv = {}
                 for key, val in self.inputs.iteritems():
-                    rv[key] = val[indices.tolist()]
+                    rv[key] = _fancy_index_array(val, indices)
                 for key, val in self.outputs.iteritems():
-                    rv[key] = val[indices.tolist()]
+                    rv[key] = _fancy_index_array(val, indices)
             yield rv
             i += 1
         return
@@ -276,7 +296,7 @@ class Data(object):
                      shuffled=False, 
                      **kwargs):
         if balanced:
-            indices_generator = self.build_balanced_indices
+            indices_generator = self.build_label_balanced_indices
         elif shuffled:
             indices_generator = self.build_shuffled_indices
         else:
