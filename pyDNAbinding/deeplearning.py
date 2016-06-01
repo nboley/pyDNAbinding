@@ -361,6 +361,7 @@ class Data(object):
         backing_fname = tempfile.mktemp(suffix='h5')
         f = h5py.File(backing_fname, "w")
         f.attrs['data_type'] = self._data_type
+        f.copy(self.task_ids, "task_ids")
         if self._data_type == 'sequential':
             _memorysafe_create_dataset(
                 f, 'inputs', self.inputs, observation_indices)
