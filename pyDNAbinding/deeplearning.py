@@ -2,31 +2,74 @@ import os
 
 import math
 import hashlib
-from itertools import chain
+from itertools import chain, izip
 from collections import OrderedDict, defaultdict
+import tempfile
 
 import numpy as np
 import h5py
 
-def _iter_array_slices(data, slize_size=5000):
-    for i in xrange(0, data.shape[0], slize_size):
-        yield slice(i, i+slize_size)
+def _slice_to_index_array(data, subset):
+    assert isinstance(subset, slice)
+    start = (0 if subset.start is None else subset.start)
+    stop = (data.shape[0] if subset.stop is None else subset.stop)
+    return np.arange(start, stop, subset.step)
 
-def _memorysafe_create_dataset(h5_obj, dset_name, data):
-    if isinstance(data, h5py._hl.dataset.Dataset):
-        h5_obj.copy(data, dset_name)
-    elif isinstance(data, np.ndarray):
-        dset = h5_obj.create_dataset(
-            dset_name, shape=data.shape, dtype=data.dtype)
-        for subset_indices in _iter_array_slices(data):
-            dset[subset_indices] = data[subset_indices]
-    else:
+def _iter_array_slices(length, slice_size=5000):
+    for i in xrange(0, length, slice_size):
+        yield slice(i, i+slice_size)
+
+def _memorysafe_create_dataset(
+        h5_obj, dset_name, data, data_subset=None):
+    # convert slices into  
+    if isinstance(data_subset, slice):
+        data_subset = _slice_to_index_array(data, data_subset)
+    # we only support h5 data sets and numpy arrays
+    if not isinstance(data, (np.ndarray, h5py._hl.dataset.Dataset)):
         raise ValueError("Unrecognized data set type: {}".format(type(data)) ) 
-    return
+    # data subset needs to be none or an array of indices
+    if data_subset is not None: 
+        if (not isinstance(data_subset, np.ndarray) 
+            or len(data_subset.shape) != 1):
+            raise ValueError("Data subset must be a one dimensional numpy array") 
+        # h5 subsetting requires a sorted index array
+        data_subset.sort()
+    
+    # fast path optimization for when we're just copying an h5 dataset
+    if data_subset is None and isinstance(data, h5py._hl.dataset.Dataset):
+        h5_obj.copy(data, dset_name)
+        return data['dset_name']
+
+    # determine the output shape, correcting for a data subset
+    output_shape = list(data.shape)
+    if data_subset is not None:
+        output_shape[0] = len(data_subset)
+
+    # create the output dataset
+    dset = h5_obj.create_dataset(
+        dset_name, shape=output_shape, dtype=data.dtype)
+    
+    # if no data subset is specified, then use the whole array
+    if data_subset is None:
+        input_slices_iterator = _iter_array_slices(data.shape[0])
+    # otherwise slice on the 
+    else:
+        input_slices_iterator = (
+            data_subset[x] for x in _iter_array_slices(data_subset.shape[0]))
+    # h5py arrays can only be indexed by lists
+    if isinstance(data, h5py._hl.dataset.Dataset):
+        input_slices_iterator = (x.tolist() for x in input_slices_iterator)
+
+    # populate the data set (finally)
+    for output_indies, input_indices in izip(
+            _iter_array_slices(dset.shape[0]), input_slices_iterator):
+        dset[output_indies] = data[input_indices]
+
+    return dset
 
 def _hash_array(data):
     chunks_hash_vals = []
-    for subset_indices in _iter_array_slices(data):
+    for subset_indices in _iter_array_slices(data.shape[0]):
         chunks_hash_vals.append(
             hashlib.sha1(np.ascontiguousarray(data[subset_indices])).hexdigest()
         )
@@ -72,6 +115,7 @@ class Data(object):
     def __hash__(self):
         if self._cached_hash is not None:
             return self._cached_hash
+
         hashes = []
         if self._data_type == 'sequential':
             hashes.append(_hash_array(self.input))
@@ -89,9 +133,10 @@ class Data(object):
                 hashes.append(_hash_array(val))
         else:
             assert False, "Unrecognized data type '{}'".format(self._data_type)
+
         self._cached_hash = abs(hash(tuple(hashes)))
         return self._cached_hash
-
+    
     @property
     def cache_fname(self):
         """File to write cached file into.
@@ -125,22 +170,6 @@ class Data(object):
                     self._data_type)
     
     @classmethod
-    def _load_sequential_data(cls, f):
-        assert f.attrs['data_type'] == 'sequential'
-        inputs = f['inputs']
-        outputs = f['outputs']
-        task_ids = f['task_ids']
-        return inputs, outputs, task_ids
-    
-    @classmethod
-    def _load_graph_data(cls, f):
-        assert f.attrs['data_type'] == 'graph'
-        inputs = f['inputs']
-        outputs = f['outputs']
-        task_ids = f['task_ids']
-        return inputs, outputs, task_ids
-
-    @classmethod
     def load(cls, fname):
         """Load data from an h5 file.
 
@@ -155,15 +184,30 @@ class Data(object):
         Raises: 
             IOError: if fname isn't able to be read
         """
+        def _load_sequential_data(f):
+            assert f.attrs['data_type'] == 'sequential'
+            inputs = f['inputs']
+            outputs = f['outputs']
+            task_ids = f['task_ids']
+            return inputs, outputs, task_ids
+
+        def _load_graph_data(f):
+            assert f.attrs['data_type'] == 'graph'
+            inputs = f['inputs']
+            outputs = f['outputs']
+            task_ids = f['task_ids']
+            return inputs, outputs, task_ids
+
+
         print "Attempting to load", fname
         f = h5py.File(fname, 'r')
         # This should probably also add a close method, but I there
         # would be very little purpose
         data_type = f.attrs['data_type']
         if data_type == 'sequential':
-            inputs, outputs, task_ids = cls._load_sequential_data(f)
+            inputs, outputs, task_ids = _load_sequential_data(f)
         elif data_type == 'graph':
-            inputs, outputs, task_ids = cls._load_graph_data(f)
+            inputs, outputs, task_ids = _load_graph_data(f)
         else:
             raise ValueError,"Unrecognized data type '{}'".format(data_type)
         # we have to jump through some hoops to allow for proper subclassing. We
@@ -174,7 +218,7 @@ class Data(object):
         instance = cls.__new__(cls)
         Data.__init__(instance, inputs, outputs, task_ids)
         return instance
-    
+        
     def __init__(self, inputs, outputs, task_ids=None):
         self._cached_hash = None
         # if inputs is an array, then we assume that this is a sequential model
@@ -314,42 +358,37 @@ class Data(object):
 
         indices: numpy array of indices to select
         """
+        backing_fname = tempfile.mktemp(suffix='h5')
+        f = h5py.File(backing_fname, "w")
+        f.attrs['data_type'] = self._data_type
         if self._data_type == 'sequential':
-            assert isinstance(inputs, (np.ndarray, h5py._hl.dataset.Dataset))
-            new_inputs = self.inputs[observation_indices]
-            assert isinstance(outputs, (np.ndarray, h5py._hl.dataset.Dataset))
-            new_outputs = self.outputs[observation_indices]
+            _memorysafe_create_dataset(
+                f, 'inputs', self.inputs, observation_indices)
+            _memorysafe_create_dataset(
+                f, 'outputs', self.outputs, observation_indices)
         elif self._data_type == 'graph':
             # indices must be sorted to subset an h5 array. This is fast, so we
-            # jsut do it once at the start
+            # just do it once at the start
             if isinstance(observation_indices, np.ndarray):
                 observation_indices.sort()
             # subset the inputs
-            new_inputs = {}
+            inputs = f.create_group("inputs")
             for key, data in self.inputs.iteritems():
-                if isinstance(data, np.ndarray):
-                    new_inputs[key] = data[observation_indices]
-                elif isinstance(data, h5py._hl.dataset.Dataset):
-                    new_inputs[key] = data[observation_indices.tolist()]
-                else:
-                    raise ValueError, "Unrecognized data array type '%s'" \
-                        % type(data)
-            # subset the outputs
-            new_outputs = {}
+                _memorysafe_create_dataset(
+                    inputs, key, data, observation_indices)
+            outputs = f.create_group("outputs")
             for key, data in self.outputs.iteritems():
-                if isinstance(data, np.ndarray):
-                    new_outputs[key] = data[observation_indices]
-                elif isinstance(data, h5py._hl.dataset.Dataset):
-                    new_outputs[key] = data[observation_indices.tolist()]
-                else:
-                    raise ValueError, "Unrecognized data array type '%s'" \
-                        % type(data)
+                _memorysafe_create_dataset(
+                    inputs, key, data, observation_indices)
         else:
             assert False,"Unrecognized model type '{}'".format(self._data_type)
-
-        rv = Data(new_inputs, new_outputs, self.task_ids)
-        rv.__class__ = self.__class__
-        return rv
+        rv = self.load(backing_fname)
+        cache_fname = rv.cache_fname
+        f.close()
+        print "Moving h5 file from {} to {}".format(
+            backing_fname, cache_fname)
+        shutil.move(backing_fname, cache_fname)
+        return self.load(cache_fname)
     
     def balance_data(self, label_key=None, task_id=None):
         indices = self.build_label_balanced_indices(
