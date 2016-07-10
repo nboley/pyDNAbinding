@@ -77,18 +77,24 @@ class DNASequence(object):
     def shape_features(self):
         return self.fwd_coded_seq[:,4:10]
 
-    def __init__(self, seq, fwd_coded_seq=None, rc_coded_seq=None):
+    def __init__(self, seq, fwd_coded_seq=None, rc_coded_seq=None, include_shape=False):
         self.seq = seq
         
         if fwd_coded_seq is None:
             fwd_one_hot_coded_seq = one_hot_encode_sequence(seq)
-            fwd_coded_shape = code_sequence_shape(seq)
-            fwd_coded_seq = np.hstack((fwd_one_hot_coded_seq, fwd_coded_shape))
+            if include_shape:
+                fwd_coded_shape = code_sequence_shape(seq)
+                fwd_coded_seq = np.hstack((fwd_one_hot_coded_seq, fwd_coded_shape))
+            else:
+                fwd_coded_seq = fwd_one_hot_coded_seq
         if rc_coded_seq is None:
             rc_seq = reverse_complement(seq)
             rc_one_hot_coded_seq = one_hot_encode_sequence(rc_seq)
-            rc_coded_shape = code_sequence_shape(rc_seq)
-            rc_coded_seq = np.hstack((rc_one_hot_coded_seq, rc_coded_shape))
+            if include_shape:
+                rc_coded_shape = code_sequence_shape(rc_seq)
+                rc_coded_seq = np.hstack((rc_one_hot_coded_seq, rc_coded_shape))
+            else:
+                rc_coded_seq = rc_one_hot_coded_seq
         
         self.fwd_coded_seq = fwd_coded_seq
         self.rc_coded_seq = rc_coded_seq

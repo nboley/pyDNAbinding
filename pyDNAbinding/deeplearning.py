@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import math
 import hashlib
@@ -20,7 +21,7 @@ def _iter_array_slices(length, slice_size=5000):
         yield slice(i, i+slice_size)
 
 def _memorysafe_create_dataset(
-        h5_obj, dset_name, data, data_subset=None):
+        h5_obj, name, data, data_subset=None):
     # convert slices into  
     if isinstance(data_subset, slice):
         data_subset = _slice_to_index_array(data, data_subset)
@@ -37,8 +38,8 @@ def _memorysafe_create_dataset(
     
     # fast path optimization for when we're just copying an h5 dataset
     if data_subset is None and isinstance(data, h5py._hl.dataset.Dataset):
-        h5_obj.copy(data, dset_name)
-        return data['dset_name']
+        h5_obj.copy(data, name)
+        return h5_obj[name]
 
     # determine the output shape, correcting for a data subset
     output_shape = list(data.shape)
@@ -47,7 +48,7 @@ def _memorysafe_create_dataset(
 
     # create the output dataset
     dset = h5_obj.create_dataset(
-        dset_name, shape=output_shape, dtype=data.dtype)
+        name, shape=output_shape, dtype=data.dtype)
     
     # if no data subset is specified, then use the whole array
     if data_subset is None:
@@ -66,6 +67,20 @@ def _memorysafe_create_dataset(
         dset[output_indies] = data[input_indices]
 
     return dset
+
+def _create_optionally_nested_dataset(h5_obj, name, data):
+    if isinstance(data, (h5py._hl.dataset.Dataset, h5py._hl.group.Group)):
+        h5_obj.copy(data, name)
+    elif isinstance(data, dict):
+        grp = h5_obj.create_group(name)
+        for key, val in data.iteritems():
+            _memorysafe_create_dataset(grp, key, val)
+        print "GROUP", grp
+        return grp
+    else:
+        print type(data)
+        assert False
+        return _memorysafe_create_dataset(h5_obj, name, data)
 
 def _hash_array(data):
     chunks_hash_vals = []
@@ -145,7 +160,7 @@ class Data(object):
         safe to use. that is, if the underlying data changes then the hash value
         will change and the cached file will be regenerated.
         """
-        return "cached%s.%i.obj" % (type(self).__name__, hash(self))
+        return "cached%s.%i.h5" % (type(self).__name__, hash(self))
     
     def cache_to_disk(self):
         """Save a cached copy of this in an h5 file.
@@ -199,7 +214,7 @@ class Data(object):
             return inputs, outputs, task_ids
 
 
-        print "Attempting to load", fname
+        print "Attempting to load", fname, "...",
         f = h5py.File(fname, 'r')
         # This should probably also add a close method, but I there
         # would be very little purpose
@@ -217,6 +232,8 @@ class Data(object):
         # and then we call __init__ on data directly.
         instance = cls.__new__(cls)
         Data.__init__(instance, inputs, outputs, task_ids)
+        print task_ids
+        print "SUCCESS"
         return instance
         
     def __init__(self, inputs, outputs, task_ids=None):
@@ -317,7 +334,7 @@ class Data(object):
             indices = permutation[subset]
             # sort the indices because h5 indexing requires it
             indices.sort()
-            assert len(indices) != len(set(indices)), 'Indices must be unique'
+            assert len(indices) == len(set(indices)), 'Indices must be unique'
             if self._data_type == 'sequential':
                 rv = (
                     _fancy_index_array(self.inputs, indices),
@@ -361,7 +378,7 @@ class Data(object):
         backing_fname = tempfile.mktemp(suffix='h5')
         f = h5py.File(backing_fname, "w")
         f.attrs['data_type'] = self._data_type
-        f.copy(self.task_ids, "task_ids")
+        _create_optionally_nested_dataset(f, "task_ids", self.task_ids)
         if self._data_type == 'sequential':
             _memorysafe_create_dataset(
                 f, 'inputs', self.inputs, observation_indices)
@@ -383,7 +400,9 @@ class Data(object):
                     inputs, key, data, observation_indices)
         else:
             assert False,"Unrecognized model type '{}'".format(self._data_type)
+        # load is a class method that returns a new instance
         rv = self.load(backing_fname)
+        return rv
         cache_fname = rv.cache_fname
         f.close()
         print "Moving h5 file from {} to {}".format(
@@ -658,7 +677,9 @@ class SamplePartitionedData():
             assert isinstance(val, Data)
         return
 
-def test_load_and_save(inputs, outputs):
+def test_load_and_save(
+        inputs={'seqs': np.zeros((10000, 50))}, 
+        outputs={'labels': np.zeros((10000, 1))}):
     data = Data(inputs, outputs)
     data.save("tmp.h5")    
     data2 = Data.load("tmp.h5")
@@ -683,3 +704,7 @@ def test_sample_partitioned_data():
             print val
         break
     return
+
+#test_load_and_save()
+#test_sample_partitioned_data()
+#test_hash()
