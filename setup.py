@@ -21,6 +21,8 @@ from distutils.core import setup, Extension
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 
+import numpy as np
+
 extensions = cythonize([
     Extension("pyDNAbinding.sequence", 
               ["pyDNAbinding/sequence.pyx", ]),
@@ -36,6 +38,7 @@ config = {
     'author_email': 'npboley@gmail.com',
     'version': '0.1.1',
     'packages': ['pyDNAbinding', ],
+    'include_dirs': [np.get_include()],
     'setup_requires': [],
     'install_requires': [ 'scipy', 'numpy', 'psycopg2' ],
     'scripts': [],
