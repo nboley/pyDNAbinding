@@ -6,7 +6,6 @@ from itertools import izip
 import numpy as np
 import yaml
 
-
 from scipy.optimize import brentq
 
 from sequence import (
@@ -310,6 +309,13 @@ class DNABindingModels(object):
     """
     def __getitem__(self, index):
         return self._models[index]
+
+    def get_from_tfname(self, tf_name):
+        return [
+            mo for mo in self._models 
+            if 'tf_name' in mo.meta_data
+                and mo.meta_data['tf_name'] == tf_name
+        ]
     
     def __len__(self):
         return len(self._models)
@@ -430,8 +436,27 @@ class ConvolutionalDNABindingModel(DNABindingModel):
             rv.append(self.score_binding_sites(seq))
         return rv
 
+    def _build_repr_dict(self):
+        # first write the meta data
+        rv = OrderedDict()
+        rv['model_type'] = self.model_type
+        for key, value in self.iter_meta_data():
+            rv[key] = value
+        # add the encoding type
+        rv['encoding_type'] = self.encoding_type
+        # add the ddg array
+        rv['convolutional_filter'] = self.convolutional_filter.round(4).tolist()
+        return rv
+
+    @property
+    def yaml_str(self):
+        return yaml.dump(dict(self._build_repr_dict()))
+
+    def save(self, ofstream):
+        ofstream.write(self.yaml_str)
+
 class PWMBindingModel(ConvolutionalDNABindingModel):
-    model_type = 'PWMbindingModel'
+    model_type = 'PWMBindingModel'
     
     def __init__(self, pwm, *args, **kwargs):
         self.pwm = np.array(pwm, dtype='float32')
@@ -460,6 +485,18 @@ class PWMBindingModel(ConvolutionalDNABindingModel):
         plot_bases(self.pwm*inf[:,None])
         if fname is not None:
             pyplot.savefig(fname)
+
+    def _build_repr_dict(self):
+        # first write the meta data
+        rv = OrderedDict()
+        rv['model_type'] = self.model_type
+        for key, value in self.iter_meta_data():
+            rv[key] = value
+        # add the encoding type
+        rv['encoding_type'] = self.encoding_type
+        # add the ddg array
+        rv['pwm'] = self.pwm.tolist()
+        return rv
 
 class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
     """A convolutional binding model where the binding site scores are the physical binding affinity.
@@ -513,14 +550,7 @@ class EnergeticDNABindingModel(ConvolutionalDNABindingModel):
             all_As_affinity += base_energies[0]
         return np.array([all_As_affinity,], dtype='float32')[0], \
             energies.T.astype('float32').view(ReducedDeltaDeltaGArray)
-    
-    @property
-    def yaml_str(self):
-        return yaml.dump(dict(self._build_repr_dict()))
-
-    def save(self, ofstream):
-        ofstream.write(self.yaml_str)
-    
+        
     def __init__(self,
                  ref_energy,
                  ddg_array,
@@ -549,7 +579,7 @@ def load_binding_models(fname):
             object_type = globals()[model_data['model_type']]
             del model_data['model_type']
             models.append( object_type(**model_data) )
-    return models
+    return DNABindingModels(models)
 
 def load_binding_model(fname):
     mos = load_binding_models(fname)
