@@ -95,7 +95,6 @@ cdef object convert_py_string_to_c_string(
         if max_sequence_length < len(sequence):
             max_sequence_length = len(sequence)
         c_sequences[0][sequence_index] = <bytes>sequence
-        printf("%s\n", <bytes>sequence)
         sequence_index += 1
         # if we have run out of space and need to reallocate
         if sequence_index == num_alld_seqs:
@@ -180,5 +179,5 @@ def reverse_complement(seq):
 
 
 def sample_random_seqs(n_sims, seq_len):
-    return ["".join(random.choice('ACGT') for j in xrange(seq_len))
+    return ["".join(random.choice(b'ACGT') for j in xrange(seq_len))
             for i in xrange(n_sims)]

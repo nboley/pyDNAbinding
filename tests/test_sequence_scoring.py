@@ -115,9 +115,7 @@ def test_find_best_subseq():
 def test_score_shape():
     mo, _ = load_models()
     seq = DNASequence('TAAATCGGTATAAAAAAAA')
-    print(mo.shape, len(seq))
     res = mo.score_binding_sites(seq)
-    print(res)
     assert (res - np.array([0.79075625, 6.1783567])).sum() < 1e-6
     print('PASS')
 
@@ -183,7 +181,7 @@ def profile_convolve_speeds():
 
 def profile_multi_convolve(seq_len, n_seqs):
     import timeit
-    seqs = FixedLengthDNASequences(['A'*seq_len]*n_seqs)
+    seqs = FixedLengthDNASequences([b'A'*seq_len]*n_seqs)
     hs = []
     for i in range(10):
         h = np.random.rand(10, 4)
@@ -203,22 +201,12 @@ def profile_multi_convolve(seq_len, n_seqs):
 
 
 def main():
-    test_score_shape()
-    test_find_best_subseq()
-    #return
-    test_my_fft_convolve()
-    score_seqs()
-    score_selex_model()
-    score_pwm()
-    score_model()
-    score_multiple_seqs()
-    # score_multiple_fixed_len_seqs()
     ## Test the custom convolve function. This takes a while so we disable it
     ## by default.
-    profile_convolve_speeds()
+    # profile_convolve_speeds()
     ## this tests the multi convolve speed optimization, which is disabled
-    ## because of threading problems. Disable for now. 
-    #profile_multi_convolve(10000000, 1)
+    ## because of threading problems. Disable for now.
+    profile_multi_convolve(10000000, 1)
 
 if __name__ == '__main__':
     main()

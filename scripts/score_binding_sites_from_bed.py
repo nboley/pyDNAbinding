@@ -13,6 +13,7 @@ from pyDNAbinding.DB import (
     load_binding_models_from_db,
     load_genome_metadata)
 
+
 def load_peaks(fname):
     rv = []
     with open(fname) as fp:
