@@ -37,42 +37,42 @@ def load_models():
     return selex_model, pwm_model
 
 
-def score_selex_model(seq_len=100000):
+def test_score_selex_model(seq_len=100000):
     model, _ = load_models()
     seq = DNASequence(b'A'*seq_len)
     score = model.score_binding_sites(seq)
     print('PASS', model.motif_len, score.shape)
 
 
-def score_pwm(seq_len=100000):
+def test_score_pwm(seq_len=100000):
     model, _ = load_models()
     seq = DNASequence(b'A'*seq_len)
     score = model.score_binding_sites(seq)
     print('PASS', model.motif_len, score.shape)
 
 
-def score_model(seq_len=100000):
+def test_score_model(seq_len=100000):
     model, _ = load_models()
     seq = DNASequence(b'A'*seq_len)
     score = model.score_binding_sites(seq)
     print('PASS', model.motif_len, score.shape)
 
 
-def score_multiple_seqs(seq_len=100000, n_seqs=10):
+def test_score_multiple_seqs(seq_len=100000, n_seqs=10):
     model, _ = load_models()
     seqs = DNASequences(['A'*seq_len]*n_seqs)
     scores = seqs.score_binding_sites(model, 'FWD')
     print('PASS', model.motif_len, len(scores))
 
 
-def score_multiple_fixed_len_seqs(seq_len=10000, n_seqs=100):
+def test_score_multiple_fixed_len_seqs(seq_len=100, n_seqs=10):
     model, _ = load_models()
-    seqs = FixedLengthDNASequences(['A'*seq_len]*n_seqs)
+    seqs = FixedLengthDNASequences([b'A'*seq_len]*n_seqs)
     scores = model.score_seqs_binding_sites(seqs)
     print('PASS', model.motif_len, len(seqs), len(scores))
 
 
-def score_seqs():
+def test_score_seqs():
     def score(seq, motif, direction):
         return DNASequence(seq).score_binding_sites(motif, direction)
     seq = 'A'*10
