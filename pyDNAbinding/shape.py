@@ -6,12 +6,12 @@ from collections import defaultdict, namedtuple
 
 import numpy as np
 
-from sequence import reverse_complement
+from pyDNAbinding.sequence import reverse_complement
 
 SHAPE_PARAM_TYPE = 'float32'
 
 def iter_fivemers(seq):
-    for start in xrange(len(seq) - 5 + 1):
+    for start in range(len(seq) - 5 + 1):
         yield seq[start:start+5]
     return
 

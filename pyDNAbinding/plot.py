@@ -3,7 +3,7 @@ import re
 from math import ceil
 from math import floor
 
-from itertools import izip
+
 
 import matplotlib
 # Force matplotlib to not use any Xwindows backend.
@@ -162,7 +162,7 @@ def standardize_polygons_str(data_str):
     polygons_data = []
     for path_str in path_strs:
         data = np.array([
-            map(float, x.split()) for x in path_str.strip().split(",")])
+            list(map(float, x.split())) for x in path_str.strip().split(",")])
         polygons_data.append(data)
 
     # standardize the coordinates
@@ -186,7 +186,7 @@ letters_polygons['C'] = standardize_polygons_str(C_data)
 letters_polygons['G'] = standardize_polygons_str(G_data)
 letters_polygons['T'] = standardize_polygons_str(T_data)
 
-colors = dict(izip(
+colors = dict(zip(
     'ACGT', (('red', 'white'), ('blue',), ('orange',), ('green',))
 ))
 
@@ -194,7 +194,7 @@ def add_letter_to_axis(ax, let, x, y, height):
     """Add 'let' with position x,y and height height to matplotlib axis 'ax'.
 
     """
-    for polygon, color in izip(letters_polygons[let], colors[let]):
+    for polygon, color in zip(letters_polygons[let], colors[let]):
         new_polygon = affinity.scale(
             polygon, yfact=height, origin=(0,0,0))
         new_polygon = affinity.translate(
@@ -227,7 +227,7 @@ def plot_bases(letter_heights, ylab='bits'):
 
     ax = fig.add_subplot(111)
     for x_pos, heights in enumerate(letter_heights):
-        letters_and_heights = sorted(izip(heights, 'ACGT'))
+        letters_and_heights = sorted(zip(heights, 'ACGT'))
         y_pos_pos = 0.0
         y_neg_pos = 0.0
         for height, letter in letters_and_heights:
@@ -242,7 +242,7 @@ def plot_bases(letter_heights, ylab='bits'):
     ax.set_ylabel(ylab)
 
     ax.set_xlim(x_range[0]-1, x_range[1]+1)
-    ax.set_xticks(range(*x_range) + [x_range[-1]])
+    ax.set_xticks(list(range(*x_range)) + [x_range[-1]])
 
     ax.set_aspect(aspect='auto', adjustable='box')
     ax.autoscale_view()

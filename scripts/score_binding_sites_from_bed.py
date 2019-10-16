@@ -7,10 +7,10 @@ from grit.lib.multiprocessing_utils import (
 
 from pyTFbindtools.motif_tools import aggregate_region_scores
 
-from pyDNAbinding.binding_model import FixedLengthDNASequences  
+from pyDNAbinding.binding_model import FixedLengthDNASequences
 from pyDNAbinding.DB import (
-    load_selex_models_from_db, 
-    load_binding_models_from_db, 
+    load_selex_models_from_db,
+    load_binding_models_from_db,
     load_genome_metadata)
 
 def load_peaks(fname):
@@ -22,7 +22,7 @@ def load_peaks(fname):
     return rv
 
 def score_model_worker(ofp, model, seqs, regions):
-    print "Scoring regions for:", model.motif_id
+    print("Scoring regions for:", model.motif_id)
     all_agg_scores = []
     for i, scores in enumerate(seqs.score_binding_sites(model, 'MAX')):
         agg_scores = aggregate_region_scores(scores)
@@ -31,7 +31,7 @@ def score_model_worker(ofp, model, seqs, regions):
                       + [model.tf_name, model.tf_id, model.motif_id, 'hg19']
                       + ["%.5e" % x for x in agg_scores]))
     ofp.write("\n".join(all_agg_scores))
-    print "FINISHED Scoring regions for:", model.motif_id
+    print("FINISHED Scoring regions for:", model.motif_id)
     return
 
 def main():

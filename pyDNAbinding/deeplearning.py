@@ -3,7 +3,7 @@ import shutil
 
 import math
 import hashlib
-from itertools import chain, izip
+from itertools import chain
 from collections import OrderedDict, defaultdict
 import tempfile
 
@@ -17,7 +17,7 @@ def _slice_to_index_array(data, subset):
     return np.arange(start, stop, subset.step)
 
 def _iter_array_slices(length, slice_size=5000):
-    for i in xrange(0, length, slice_size):
+    for i in range(0, length, slice_size):
         yield slice(i, i+slice_size)
 
 def _memorysafe_create_dataset(
@@ -62,7 +62,7 @@ def _memorysafe_create_dataset(
         input_slices_iterator = (x.tolist() for x in input_slices_iterator)
 
     # populate the data set (finally)
-    for output_indies, input_indices in izip(
+    for output_indies, input_indices in zip(
             _iter_array_slices(dset.shape[0]), input_slices_iterator):
         dset[output_indies] = data[input_indices]
 
@@ -73,12 +73,12 @@ def _create_optionally_nested_dataset(h5_obj, name, data):
         h5_obj.copy(data, name)
     elif isinstance(data, dict):
         grp = h5_obj.create_group(name)
-        for key, val in data.iteritems():
+        for key, val in data.items():
             _memorysafe_create_dataset(grp, key, val)
-        print "GROUP", grp
+        print("GROUP", grp)
         return grp
     else:
-        print type(data)
+        print(type(data))
         assert False
         return _memorysafe_create_dataset(h5_obj, name, data)
 
@@ -103,7 +103,7 @@ class Data(object):
 
     """
     def __len__(self):
-        return len(self.inputs.values()[0])
+        return len(list(self.inputs.values())[0])
 
     def _save_sequential(self, f):
         assert self._data_type == 'sequential'
@@ -117,13 +117,13 @@ class Data(object):
         assert self._data_type == 'graph'
         f.attrs['data_type'] = self._data_type
         inputs = f.create_group("inputs")
-        for key, val in self.inputs.iteritems():
+        for key, val in self.inputs.items():
             _memorysafe_create_dataset(inputs, key, data=val)        
         outputs = f.create_group("outputs")
-        for key, val in self.outputs.iteritems():
+        for key, val in self.outputs.items():
             _memorysafe_create_dataset(outputs, key, data=val)
         task_ids = f.create_group("task_ids")
-        for key, val in self.task_ids.iteritems():
+        for key, val in self.task_ids.items():
             _memorysafe_create_dataset(task_ids, key, data=val)
         return
 
@@ -140,10 +140,10 @@ class Data(object):
             hashes.append(hash(tuple(self.inputs.keys())))
             hashes.append(hash(tuple(self.outputs.keys())))
             hashes.append(hash(tuple(self.task_ids)))
-            for val in self.inputs.values():
+            for val in list(self.inputs.values()):
                 # the array is required to be c contiguous to calculate the hash
                 hashes.append(_hash_array(val))
-            for val in self.outputs.values():
+            for val in list(self.outputs.values()):
                 # the array is required to be c contiguous to calculate the hash
                 hashes.append(_hash_array(val))
         else:
@@ -181,8 +181,8 @@ class Data(object):
             elif self._data_type == 'graph':
                 self._save_graph(f)
             else:
-                raise ValueError, "Unrecognized data type '{}'".format(
-                    self._data_type)
+                raise ValueError("Unrecognized data type '{}'".format(
+                    self._data_type))
     
     @classmethod
     def load(cls, fname):
@@ -214,7 +214,7 @@ class Data(object):
             return inputs, outputs, task_ids
 
 
-        print "Attempting to load", fname, "...",
+        print("Attempting to load", fname, "...", end=' ')
         f = h5py.File(fname, 'r')
         # This should probably also add a close method, but I there
         # would be very little purpose
@@ -224,7 +224,7 @@ class Data(object):
         elif data_type == 'graph':
             inputs, outputs, task_ids = _load_graph_data(f)
         else:
-            raise ValueError,"Unrecognized data type '{}'".format(data_type)
+            raise ValueError("Unrecognized data type '{}'".format(data_type))
         # we have to jump through some hoops to allow for proper subclassing. We
         # want the init methods to be able to allow for flexible argument 
         # patterns, but the interface all uses inputs, outputs, and taskids. So
@@ -232,8 +232,8 @@ class Data(object):
         # and then we call __init__ on data directly.
         instance = cls.__new__(cls)
         Data.__init__(instance, inputs, outputs, task_ids)
-        print task_ids
-        print "SUCCESS"
+        print(task_ids)
+        print("SUCCESS")
         return instance
         
     def __init__(self, inputs, outputs, task_ids=None):
@@ -241,25 +241,25 @@ class Data(object):
         # if inputs is an array, then we assume that this is a sequential model
         if isinstance(inputs, (np.ndarray, h5py._hl.dataset.Dataset)):
             if not isinstance(outputs, (np.ndarray, h5py._hl.dataset.Dataset)):
-                raise ValueError, "If the input is a numpy array, then the output is also expected to be a numpy array.\n" \
-                    + "Hint: You can use multiple inputs and outputs by passing a dictionary keyed by the data type name."
+                raise ValueError("If the input is a numpy array, then the output is also expected to be a numpy array.\n" \
+                    + "Hint: You can use multiple inputs and outputs by passing a dictionary keyed by the data type name.")
             self._data_type = "sequential"
             self.num_observations = inputs.shape[0]
             assert self.num_observations == outputs.shape[0]
             # if no task ids are set, set them to indices
             if task_ids is not None:
                 if not isinstance(task_ids, (np.ndarray, h5py._hl.dataset.Dataset)):
-                    raise ValueError, "The task ids must be an array type"
+                    raise ValueError("The task ids must be an array type")
                 assert len(task_ids) == outputs.shape[1]
             else:
                 task_ids = np.array(
-                    [str(x) for x in xrange(1, outputs.shape[1]+1)])
+                    [str(x) for x in range(1, outputs.shape[1]+1)])
         # otherwise assume that this is a graph type model
         else:
-            self.num_observations = inputs.values()[0].shape[0]
+            self.num_observations = list(inputs.values())[0].shape[0]
             # make sure that all of that data are arrays and have the same
             # number of observations
-            for key, val in chain(inputs.iteritems(), outputs.iteritems()):
+            for key, val in chain(iter(inputs.items()), iter(outputs.items())):
                 assert isinstance(val, (np.ndarray, h5py._hl.dataset.Dataset))
                 assert self.num_observations == val.shape[0], \
                     "The number of observations ({}) is not equal to the first shape dimension of {} ({})".format(
@@ -268,15 +268,15 @@ class Data(object):
             # exist, then default to sequential numbers
             if task_ids is None:
                 task_ids = {}
-            for key in outputs.iterkeys():
+            for key in outputs.keys():
                 if key in task_ids:
                     if len(task_ids[key]) != outputs[key].shape[1]:
-                        raise ValueError, "The number of task ids for key '{}' does not match the output shape".format()
+                        raise ValueError("The number of task ids for key '{}' does not match the output shape".format())
                     if not isinstance(task_ids[key], (np.ndarray, h5py._hl.dataset.Dataset)):
-                        raise ValueError, "The task ids must be an array type"
+                        raise ValueError("The task ids must be an array type")
                 else:
                     task_ids[key] = np.array([
-                        str(x) for x in xrange(1, outputs[key].shape[1]+1)])
+                        str(x) for x in range(1, outputs[key].shape[1]+1)])
             self._data_type = "graph"
 
         self.task_ids = task_ids
@@ -290,7 +290,7 @@ class Data(object):
             labels = self.outputs
         else:
             if label_key is None and len(self.outputs) == 1:
-                labels = next(self.outputs.itervalues())
+                labels = next(iter(self.outputs.values()))
             else:
                 assert task_id is not None
                 labels = self.inputs[task_id]
@@ -342,9 +342,9 @@ class Data(object):
                 )
             else:
                 rv = {}
-                for key, val in self.inputs.iteritems():
+                for key, val in self.inputs.items():
                     rv[key] = _fancy_index_array(val, indices)
-                for key, val in self.outputs.iteritems():
+                for key, val in self.outputs.items():
                     rv[key] = _fancy_index_array(val, indices)
             yield rv
             i += 1
@@ -391,11 +391,11 @@ class Data(object):
                 observation_indices.sort()
             # subset the inputs
             inputs = f.create_group("inputs")
-            for key, data in self.inputs.iteritems():
+            for key, data in self.inputs.items():
                 _memorysafe_create_dataset(
                     inputs, key, data, observation_indices)
             outputs = f.create_group("outputs")
-            for key, data in self.outputs.iteritems():
+            for key, data in self.outputs.items():
                 _memorysafe_create_dataset(
                     inputs, key, data, observation_indices)
         else:
@@ -405,8 +405,8 @@ class Data(object):
         return rv
         cache_fname = rv.cache_fname
         f.close()
-        print "Moving h5 file from {} to {}".format(
-            backing_fname, cache_fname)
+        print("Moving h5 file from {} to {}".format(
+            backing_fname, cache_fname))
         shutil.move(backing_fname, cache_fname)
         return self.load(cache_fname)
     
@@ -431,11 +431,11 @@ class Data(object):
                 raise ValueError(
                     "If there are multiple output arrays then label_key must be specified.")
             else:
-                label_key = self.outputs.keys()[0]
+                label_key = list(self.outputs.keys())[0]
         
         new_outputs = {}
         # pass through the data for outputs not equal to label key
-        for task_key, data in self.outputs.iteritems():
+        for task_key, data in self.outputs.items():
             if task_key != label_key:
                 new_outputs[task_key] = data
             
@@ -530,17 +530,17 @@ class SamplePartitionedData():
 
     """
     def __len__(self):
-        return sum(len(x) for x in self._data.itervalues())
+        return sum(len(x) for x in self._data.values())
 
     @property
     def sample_ids(self):
-        return self._data.keys()
+        return list(self._data.keys())
 
     def __hash__(self):
         if self._cached_hash is not None:
             return self._cached_hash
         hashes = [hash(tuple(sorted(self._data.keys()))),
-        ] + [hash(val) for val in self._data.values()]
+        ] + [hash(val) for val in list(self._data.values())]
         self._cached_hash = abs(hash(tuple(hashes)))
         return self._cached_hash
 
@@ -559,7 +559,7 @@ class SamplePartitionedData():
     
     def save(self, fname):
         with h5py.File(fname, "w") as f:
-            for key, data in self._data.iteritems():
+            for key, data in self._data.items():
                 sample_fname = data.cache_to_disk()
                 f[key] = h5py.ExternalLink(sample_fname, "/")
         return fname
@@ -581,7 +581,7 @@ class SamplePartitionedData():
         """
         rv  = {}
         with h5py.File(fname, 'r') as f:
-            for key, data in f.iteritems():
+            for key, data in f.items():
                 rv[key] = Data(**data)
         return cls(rv)
 
@@ -614,11 +614,11 @@ class SamplePartitionedData():
         if sample_weights is None:
             sample_weights = np.ones(len(self._data), dtype=float)
         fractions = sample_weights*np.array([
-            x.num_observations for x in self._data.values()], dtype=float)
+            x.num_observations for x in list(self._data.values())], dtype=float)
         fractions = fractions/fractions.sum()
         inner_batch_sizes = np.array(batch_size*fractions, dtype=int)
         # accounting for any rounding from the previous step 
-        for i in xrange(batch_size - inner_batch_sizes.sum()):
+        for i in range(batch_size - inner_batch_sizes.sum()):
             inner_batch_sizes[i] += 1
 
         iterators = OrderedDict(
@@ -626,7 +626,7 @@ class SamplePartitionedData():
              data.iter_batches(
                  i_batch_size, repeat_forever, **kwargs) )
             for i_batch_size, (sample_id, data) in zip(
-                    inner_batch_sizes, self._data.iteritems())
+                    inner_batch_sizes, iter(self._data.items()))
         )
 
         def f():
@@ -641,20 +641,20 @@ class SamplePartitionedData():
                         iterator = iterators[sample_id]
                         data = next(iterator)
                         cnt = None
-                        for key, vals in data.iteritems():
+                        for key, vals in data.items():
                             grpd_res[key].append(vals)
                             if cnt == None: cnt = vals.shape[0]
                             assert cnt == vals.shape[0]
                         cnts.append(cnt)
                 
-                for key, vals in grpd_res.iteritems():
+                for key, vals in grpd_res.items():
                     grpd_res[key] = np.concatenate(grpd_res[key], axis=0)
                     
                 # build the sample labels
                 cnts = np.array(cnts)
                 sample_labels = np.zeros(
                     (cnts.sum(), len(self.sample_ids)), dtype='float32')
-                for i in xrange(len(cnts)):
+                for i in range(len(cnts)):
                     start_index = (0 if i == 0 else np.cumsum(cnts)[i-1])
                     stop_index = np.cumsum(cnts)[i]
                     sample_labels[start_index:stop_index,i] = 1                
@@ -670,10 +670,10 @@ class SamplePartitionedData():
     def __init__(self, samples_and_data):
         self._cached_hash = None
         try: 
-            self._data = OrderedDict(samples_and_data.iteritems())
+            self._data = OrderedDict(iter(samples_and_data.items()))
         except AttributeError:
             self._data = OrderedDict(samples_and_data)
-        for val in self._data.itervalues():
+        for val in self._data.values():
             assert isinstance(val, Data)
         return
 
@@ -699,9 +699,9 @@ def test_sample_partitioned_data():
     fname = s.cache_to_disk()
     s2 = SamplePartitionedData.load(fname)
     for x in s2.iter_batches(10):
-        for key, val in x.iteritems():
-            print key, val.shape
-            print val
+        for key, val in x.items():
+            print(key, val.shape)
+            print(val)
         break
     return
 

@@ -3,38 +3,42 @@ import numpy as np
 from collections import namedtuple
 
 import psycopg2
-conn = psycopg2.connect("host=mitra dbname=cisbp")
+# conn = psycopg2.connect("host=mitra dbname=cisbp")
 
-from binding_model import (
+from .binding_model import (
     PWMBindingModel, EnergeticDNABindingModel, DNABindingModels )
+
 
 class NoBindingModelsFoundError(Exception):
     pass
 
+
 Genome = namedtuple('Genome', ['name', 'revision', 'species', 'filename'])
+
+
 def load_genome_metadata(annotation_id):
     cur = conn.cursor()
     query = """
-    SELECT name, revision, species, local_filename 
-      FROM genomes 
+    SELECT name, revision, species, local_filename
+      FROM genomes
      WHERE annotation_id=%s;
     """
     cur.execute(query, [annotation_id,])
     res = cur.fetchall()
-    if len(res) == 0: 
-        raise ValueError, \
-            "No genome exists in the DB with annotation_id '%i' " \
-                % annotation_id
+    if len(res) == 0:
+        raise ValueError("No genome exists in the DB with annotation_id '%i' " \
+                % annotation_id)
     assert len(res) == 1
     return Genome(*(res[0]))
 
+
 def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
-    cur = conn.cursor()    
+    cur = conn.cursor()
     query = """
-    SELECT tf_id, motif_id, tf_name, tf_species, pwm 
-      FROM related_motifs_mv NATURAL JOIN pwms 
-     WHERE tf_species in ('Mus_musculus', 'Homo_sapiens') 
-       AND rank = 1 
+    SELECT tf_id, motif_id, tf_name, tf_species, pwm
+      FROM related_motifs_mv NATURAL JOIN pwms
+     WHERE tf_species in ('Mus_musculus', 'Homo_sapiens')
+       AND rank = 1
     """
     # convert single provided filters into lists
     if isinstance(tf_names, str): tf_names = [tf_names,]
@@ -53,12 +57,12 @@ def load_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
         query += " AND motif_id in %s"
         cur.execute(query, [tuple(motif_ids),])
     else:
-        raise ValueError, "only one of tf_ids, tf_names, and motif_ids can can be set."
-    
+        raise ValueError("only one of tf_ids, tf_names, and motif_ids can can be set.")
+
     def iter_models():
         for data in cur.fetchall():
             tf_id, motif_id, tf_name, tf_species, pwm = list(data)
-            
+
             yield PWMBindingModel(
                 pwm, 
                 tf_id=tf_id, 
@@ -98,7 +102,7 @@ def load_all_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
         query += " AND motif_id in %s"
         cur.execute(query, [tuple(motif_ids),])
     else:
-        raise ValueError, "only one of tf_ids, tf_names, and motif_ids can can be set."
+        raise ValueError("only one of tf_ids, tf_names, and motif_ids can can be set.")
     
     def iter_models():
         for data in cur.fetchall():
@@ -113,8 +117,8 @@ def load_all_pwms_from_db(tf_names=None, tf_ids=None, motif_ids=None):
     
     models = DNABindingModels(iter_models())
     if len(models) == 0:        
-        raise NoBindingModelsFoundError, "No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
-            tf_ids, tf_names, motif_ids)
+        raise NoBindingModelsFoundError("No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
+            tf_ids, tf_names, motif_ids))
 
     return models
 
@@ -146,7 +150,7 @@ def load_selex_models_from_db(tf_names=None, tf_ids=None, motif_ids=None):
         query += " WHERE selex_models.key in %s"
         cur.execute(query, [tuple(motif_ids),])
     else:
-        raise ValueError, "only one of tf_ids, tf_names, and motif_ids can can be set."
+        raise ValueError("only one of tf_ids, tf_names, and motif_ids can can be set.")
 
     def iter_models():
         for data in cur.fetchall():
@@ -164,8 +168,8 @@ def load_selex_models_from_db(tf_names=None, tf_ids=None, motif_ids=None):
 
     models = DNABindingModels(iter_models())
     if len(models) == 0:
-        raise NoBindingModelsFoundError, "No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
-            tf_ids, tf_names, motif_ids)
+        raise NoBindingModelsFoundError("No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
+            tf_ids, tf_names, motif_ids))
 
     return list(models)
 
@@ -180,6 +184,6 @@ def load_binding_models_from_db(tf_names=None, tf_ids=None, motif_ids=None):
     rv = selex_motifs+[
         el for el in cisbp_motifs if el.tf_id not in selex_tf_ids]
     if len(rv) == 0:        
-        raise NoBindingModelsFoundError, "No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
-            tf_ids, tf_names, motif_ids)
+        raise NoBindingModelsFoundError("No binding models found (tf_ids: %s, tf_names: %s, motif_ids: %s)" % (
+            tf_ids, tf_names, motif_ids))
     return rv

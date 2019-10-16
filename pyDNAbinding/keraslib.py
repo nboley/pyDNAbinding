@@ -20,8 +20,8 @@ from keras.layers.convolutional import Convolution2D, MaxPooling2D
 import theano
 import theano.tensor as TT
 
-from binding_model import ConvolutionalDNABindingModel
-from misc import calc_occ, R, T
+from .binding_model import ConvolutionalDNABindingModel
+from .misc import calc_occ, R, T
 
 def cast_if_1D(x):
     if len(x.shape) == 1:
@@ -60,13 +60,13 @@ def iter_weighted_batch_samples(model, batch_iterator, oversampling_ratio=1):
     while True:
         # group the output of oversampling_ratio batches together
         all_batches = defaultdict(list)
-        for i in xrange(oversampling_ratio):
-            for key, val in next(batch_iterator).iteritems():
+        for i in range(oversampling_ratio):
+            for key, val in next(batch_iterator).items():
                 all_batches[key].append(val)
         # find the batch size
-        batch_size = next(all_batches.itervalues())[0].shape[0]
+        batch_size = next(iter(all_batches.values()))[0].shape[0]
         # stack the output
-        for key, batches in all_batches.iteritems():
+        for key, batches in all_batches.items():
             all_batches[key] = np.vstack(batches)
 
         # weight the batch values
@@ -92,7 +92,7 @@ def iter_weighted_batch_samples(model, batch_iterator, oversampling_ratio=1):
         output = {}
         loss_indices = np.random.choice(
             len(weights), size=batch_size, replace=False, p=weights)
-        for key in all_batches.keys():
+        for key in list(all_batches.keys()):
             output[key] = all_batches[key][loss_indices,:]
         yield output
     
@@ -234,8 +234,8 @@ class ConvolutionDNASequenceBinding(Layer):
                 )
     
     def get_output(self, train=False):
-        print "Input Shape", self.input_shape
-        print "ConvolutionDNASequenceBinding", self.output_shape
+        print("Input Shape", self.input_shape)
+        print("ConvolutionDNASequenceBinding", self.output_shape)
         X = self.get_input(train)
         if self.use_three_base_encoding:
             X_fwd = X[:,1:,:,:]
@@ -244,8 +244,8 @@ class ConvolutionDNASequenceBinding(Layer):
             X_fwd = X
             X_rc = X
 
-        print self.W
-        print self.b
+        print(self.W)
+        print(self.b)
         if self.W[1] is not None:
             W = self.W[0][self.W[1],:,:,:]
         else:
@@ -265,7 +265,7 @@ class ConvolutionDNASequenceBinding(Layer):
 
     def extract_binding_models(self):
         mos = []
-        for i in xrange(self.nb_motifs):
+        for i in range(self.nb_motifs):
             ddg_array = self.W[0].get_value()[i,:,0,:]
             ddg_array = np.vstack(
                 (np.zeros((1, ddg_array.shape[1])), ddg_array)).T
@@ -333,7 +333,7 @@ class ConvolutionBindingSubDomains(Layer):
         if self.W is None:
             assert self.b is None
             self.init_filters(self.input_shape[1])
-        print "Subdomains Filter Shape:", self.W_shape
+        print("Subdomains Filter Shape:", self.W_shape)
         #assert self.input_shape[3] == self.W_shape[3]
         self.trainable_weights = [self.W[0], self.b[0]]
 
@@ -347,7 +347,7 @@ class ConvolutionBindingSubDomains(Layer):
                 self.input_shape[3]-self.domain_len+1)
     
     def get_output(self, train=False):
-        print "ConvolutionBindingSubDomains", self.output_shape
+        print("ConvolutionBindingSubDomains", self.output_shape)
         X = self.get_input(train)
         if self.W[1] is not None:
             W = self.W[0][self.W[1],:,:,:]
@@ -405,7 +405,7 @@ class LogNormalizedOccupancy(Layer):
         )
     
     def get_output(self, train=False):
-        print "LogNormalizedOccupancy", self.output_shape
+        print("LogNormalizedOccupancy", self.output_shape)
         X = self.get_input(train)
         # calculate the log occupancies
         log_occs = theano_calc_log_occs(-X, self.chem_affinity)
@@ -451,7 +451,7 @@ class TrackMax(Layer):
                 1)
 
     def get_output(self, train=False):
-        print "TrackMax", self.output_shape
+        print("TrackMax", self.output_shape)
         X = self.get_input(train)
         rv = K.max(X, axis=3, keepdims=True)
         return rv
@@ -492,7 +492,7 @@ class OccMaxPool(Layer):
         )
 
     def get_output(self, train=False):
-        print "OccMaxPool", self.output_shape, self.input_shape
+        print("OccMaxPool", self.output_shape, self.input_shape)
         num_tracks = (
             self.input_shape[1] if self.num_tracks == 'full' 
             else self.num_tracks
@@ -570,7 +570,7 @@ class ConvolutionCoOccupancy(Layer):
         if self.W is None:
             assert self.b is None
             self.init_filters(self.input_shape[1])
-        print "Occ Subdomains Filter Shape:", self.W_shape
+        print("Occ Subdomains Filter Shape:", self.W_shape)
         #assert self.input_shape[3] == self.W_shape[3]
         self.trainable_weights = [self.W[0], self.b[0]]
 
@@ -584,7 +584,7 @@ class ConvolutionCoOccupancy(Layer):
                 self.input_shape[3]-self.domain_len+1)
     
     def get_output(self, train=False):
-        print "ConvolutionCoOccupancy", self.output_shape, self.input_shape
+        print("ConvolutionCoOccupancy", self.output_shape, self.input_shape)
         X = self.get_input(train)
         if self.W[1] is not None:
             W = self.W[0][self.W[1],:,:,:]
@@ -669,7 +669,7 @@ class LogAnyBoundOcc(Layer):
                 1)
 
     def get_output(self, train=False):
-        print "LogAnyBoundOcc", self.output_shape
+        print("LogAnyBoundOcc", self.output_shape)
         X = self.get_input(train)
         log_none_bnd = K.sum(
             K.log(1-K.clip(K.exp(X), 1e-6, 1-1e-6)), axis=3, keepdims=True)

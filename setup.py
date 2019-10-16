@@ -16,21 +16,19 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with pyTFbindtools.  If not, see <http://www.gnu.org/licenses/>.
 """
-from distutils.core import setup, Extension
-
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 
 import numpy as np
 
 extensions = cythonize([
-    Extension("pyDNAbinding.sequence", 
+    Extension("pyDNAbinding.sequence",
               ["pyDNAbinding/sequence.pyx", ]),
 ])
 
 config = {
     'include_package_data': True,
-    'ext_modules': extensions, 
+    'ext_modules': extensions,
     'description': 'pyDNAbinding',
     'author': 'Nathan Boley',
     'url': 'NA',
@@ -40,10 +38,11 @@ config = {
     'packages': ['pyDNAbinding', ],
     'include_dirs': [np.get_include()],
     'setup_requires': [],
-    'install_requires': [ 'scipy', 'numpy', 'psycopg2' ],
+    'install_requires': ['scipy', 'numpy', 'psycopg2'],
     'scripts': [],
     'name': 'pyDNAbinding'
 }
 
-if __name__== '__main__':
+
+if __name__ == '__main__':
     setup(**config)
